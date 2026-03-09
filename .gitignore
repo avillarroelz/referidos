@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Claude/Agents
+.claude/
+.agents/
+
+# Config sensible
+backend/gmail-config.json
+backend/config/config.json
+backend/gmail-token.json
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+TrackerEcora/
+backend/uploads/
