@@ -1,4 +1,5 @@
 // backend/src/controllers/auth.controller.js
+const crypto = require('crypto')
 const { body, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { compare, hash } = require('../utils/hash')
@@ -6,6 +7,48 @@ const { generateTokens, verifyRefreshToken, generateAccessToken } = require('../
 const googleAuthService = require('../services/googleAuthService')
 
 const Usuario = getModel('Usuario')
+
+// Detectar URL del frontend basado en el referer o CORS_ORIGIN
+function getFrontendUrl(req) {
+  const referer = req.headers.referer || req.headers.origin || ''
+  const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map(s => s.trim())
+
+  // Si el referer coincide con algún origen permitido, usarlo
+  for (const origin of allowedOrigins) {
+    if (referer.startsWith(origin)) return origin
+  }
+
+  // Fallback: detectar si el request viene por IP y construir URL con el mismo host
+  const host = req.headers.host // e.g. "10.10.10.103:4000"
+  if (host && !host.includes('localhost')) {
+    const hostname = host.split(':')[0]
+    return `http://${hostname}:5173`
+  }
+
+  return allowedOrigins[0]
+}
+
+// Página HTML que redirige al frontend (evita bloqueo de redirect cross-origin)
+function buildRedirectPage(url) {
+  return `<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=${url}">
+<title>Redirigiendo...</title>
+</head><body>
+<p>Redirigiendo...</p>
+<script>window.location.href="${url}";</script>
+</body></html>`
+}
+
+// Store temporal para códigos OAuth (TTL 60s)
+const oauthCodes = new Map()
+function storeOAuthCode(tokens) {
+  const code = crypto.randomBytes(32).toString('hex')
+  oauthCodes.set(code, tokens)
+  setTimeout(() => oauthCodes.delete(code), 60000)
+  return code
+}
 
 // ──────────────────────────────────────────────────────────────
 // LOGIN
@@ -354,16 +397,32 @@ async function googleCallback(req, res) {
 
     console.log(`[auth] Login con Google exitoso: ${user.correo}`)
 
-    // Redirigir al frontend con los tokens
-    const frontendUrl = process.env.CORS_ORIGIN?.split(',')[0] || 'http://localhost:5173'
-    const redirectUrl = `${frontendUrl}/auth/google/callback?token=${accessToken}&refreshToken=${refreshToken}`
-
-    res.redirect(redirectUrl)
+    // Guardar tokens con código temporal y redirigir con página HTML
+    const tempCode = storeOAuthCode({ accessToken, refreshToken })
+    const frontendUrl = getFrontendUrl(req)
+    const redirectUrl = `${frontendUrl}/auth/google/callback?code=${tempCode}`
+    res.send(buildRedirectPage(redirectUrl))
   } catch (error) {
     console.error('[auth] Error en callback de Google:', error)
-    const frontendUrl = process.env.CORS_ORIGIN?.split(',')[0] || 'http://localhost:5173'
-    res.redirect(`${frontendUrl}/login?error=google_auth_failed`)
+    const frontendUrl = getFrontendUrl(req)
+    res.send(buildRedirectPage(`${frontendUrl}/login?error=google_auth_failed`))
   }
+}
+
+/**
+ * Intercambiar código temporal por tokens JWT
+ */
+async function googleExchange(req, res) {
+  const { code } = req.body
+
+  if (!code || !oauthCodes.has(code)) {
+    return res.status(400).json({ error: 'Código inválido o expirado' })
+  }
+
+  const tokens = oauthCodes.get(code)
+  oauthCodes.delete(code)
+
+  res.json(tokens)
 }
 
 module.exports = {
@@ -375,5 +434,6 @@ module.exports = {
   refreshValidators,
   me,
   googleLogin,
-  googleCallback
+  googleCallback,
+  googleExchange
 }

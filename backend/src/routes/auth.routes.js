@@ -11,7 +11,8 @@ const {
   refreshValidators,
   me,
   googleLogin,
-  googleCallback
+  googleCallback,
+  googleExchange
 } = require('../controllers/auth.controller')
 
 // Rutas públicas (con rate limiting estricto)
@@ -22,6 +23,7 @@ router.post('/refresh', authLoginLimiter, refreshValidators, refresh)
 // Rutas de Google OAuth
 router.get('/google', googleLogin)
 router.get('/google/callback', googleCallback)
+router.post('/google/exchange', googleExchange)
 
 // Rutas protegidas
 router.get('/me', authRequired, me)
