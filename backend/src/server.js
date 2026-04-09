@@ -13,7 +13,7 @@ async function seedRolesAndAdmin() {
   const Rol = getModel('Rol')
 
   // 1) Crear roles base
-  const defaults = (process.env.ROLES_DEFAULT || 'TRABAJADOR,RRHH,ADMIN,ADC')
+  const defaults = (process.env.ROLES_DEFAULT || 'TRABAJADOR,RRHH,ADMIN,ADC,JefeRRHH')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)
@@ -44,6 +44,17 @@ async function seedRolesAndAdmin() {
 
 async function bootstrap(){
   try{
+    // Validaciones de seguridad al iniciar
+    if (config.jwt.secret === config.jwt.refreshSecret) {
+      console.warn('⚠️  SEGURIDAD: JWT_SECRET y JWT_REFRESH_SECRET son idénticos. Usa valores diferentes.')
+    }
+    if (config.jwt.secret.length < 16) {
+      console.warn('⚠️  SEGURIDAD: JWT_SECRET es muy corto (mínimo 16 caracteres recomendado)')
+    }
+    if (!process.env.INTEGRACION_API_KEY) {
+      console.warn('⚠️  SEGURIDAD: INTEGRACION_API_KEY no configurada — endpoint de integración deshabilitado')
+    }
+
     await sequelize.authenticate()
     console.log('✅ DB conectada')
 

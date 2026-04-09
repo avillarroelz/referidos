@@ -7,8 +7,8 @@ const ctrl = require('../controllers/referidos.controller')
 // Todas requieren login
 router.use(authRequired)
 
-// Crear (cualquier autenticado)
-router.post('/', ctrl.createValidators, ctrl.create)
+// Crear (TRABAJADOR, RRHH, JefeRRHH o ADMIN — ADC no crea referidos)
+router.post('/', requireRoles('TRABAJADOR', 'RRHH', 'JefeRRHH', 'ADMIN'), ctrl.createValidators, ctrl.create)
 
 // Listar (cualquier autenticado) – el controller aplica permisos
 router.get('/', ctrl.listValidators, ctrl.list)
@@ -17,7 +17,7 @@ router.get('/', ctrl.listValidators, ctrl.list)
 router.get('/stats', ctrl.getStats)
 
 // Listar usuarios con rol ADC (para select de asignación) — ANTES de /:id
-router.get('/adc-usuarios', requireRoles('RRHH', 'ADMIN'), ctrl.listarADCUsuarios)
+router.get('/adc-usuarios', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), ctrl.listarADCUsuarios)
 
 // Listar referidos asignados al ADC autenticado — ANTES de /:id
 router.get('/mis-asignados', requireRoles('ADC'), ctrl.listarParaADC)
@@ -28,17 +28,17 @@ router.get('/:id', ctrl.getValidators, ctrl.getById)
 // Historial del referido
 router.get('/:id/historial', ctrl.getValidators, ctrl.getHistorial)
 
-// Cambiar estado (solo RRHH o ADMIN)
-router.patch('/:id/estado', requireRoles('RRHH', 'ADMIN'), ctrl.changeValidators, ctrl.changeState)
+// Cambiar estado (RRHH, JefeRRHH o ADMIN)
+router.patch('/:id/estado', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), ctrl.changeValidators, ctrl.changeState)
 
 // Compatibilidad POST
-router.post('/:id/estado', requireRoles('RRHH', 'ADMIN'), ctrl.changeValidators, ctrl.changeState)
+router.post('/:id/estado', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), ctrl.changeValidators, ctrl.changeState)
 
-// Marcar como enviado a ADC (solo RRHH o ADMIN) — legacy
-router.patch('/:id/adc', requireRoles('RRHH', 'ADMIN'), ctrl.enviarADCValidators, ctrl.enviarADC)
+// Marcar como enviado a ADC (RRHH, JefeRRHH o ADMIN) — legacy
+router.patch('/:id/adc', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), ctrl.enviarADCValidators, ctrl.enviarADC)
 
-// Asignar a ADC específico (solo RRHH o ADMIN)
-router.patch('/:id/asignar-adc', requireRoles('RRHH', 'ADMIN'), ctrl.asignarADCValidators, ctrl.asignarADC)
+// Asignar a ADC específico (RRHH, JefeRRHH o ADMIN)
+router.patch('/:id/asignar-adc', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), ctrl.asignarADCValidators, ctrl.asignarADC)
 
 // Dictamen ADC (solo ADC)
 router.patch('/:id/dictamen', requireRoles('ADC'), ctrl.dictaminarValidators, ctrl.dictaminar)

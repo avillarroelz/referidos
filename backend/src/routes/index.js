@@ -15,5 +15,6 @@ router.use('/kpis', require('./kpis.routes'))
 router.use('/gmail', require('./gmail.routes'))
 router.use('/notificaciones', require('./notificaciones.routes'))
 router.use('/public', require('./public.routes'))
+router.use('/integracion', require('./integracion.routes'))
 
 module.exports = router

@@ -66,7 +66,8 @@ function rolesFromReq(req) {
   const hasRRHH = roles.includes('RRHH')
   const hasADMIN = roles.includes('ADMIN')
   const hasADC = roles.includes('ADC')
-  return { roles, hasRRHH, hasADMIN, hasADC }
+  const hasJefeRRHH = roles.includes('JefeRRHH')
+  return { roles, hasRRHH, hasADMIN, hasADC, hasJefeRRHH }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -80,13 +81,17 @@ async function getStats(req, res) {
   try {
     const t0 = Date.now()
 
-    // Obtener solo los conteos agrupados por estado para el usuario
+    // RRHH/Admin/JefeRRHH ven stats de todos; el resto solo los propios
+    const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+    const canViewAll = hasRRHH || hasADMIN || hasJefeRRHH
+    const whereClause = canViewAll ? {} : { creadoPorUserId: req.auth.id }
+
     const stats = await Referido.findAll({
       attributes: [
         'estado',
         [sequelize.fn('COUNT', sequelize.col('id')), 'count']
       ],
-      where: { creadoPorUserId: req.auth.id },
+      where: whereClause,
       group: ['estado'],
       raw: true
     })
@@ -99,11 +104,14 @@ async function getStats(req, res) {
 
     // Calcular totales
     const total = Object.values(byEstado).reduce((sum, n) => sum + n, 0)
-    const pendientes = byEstado.PENDIENTE || 0
-    const aprobados = byEstado.APROBADO || 0
-    const enProceso = (byEstado.EN_REVISION || 0) + (byEstado.CONTACTADO || 0)
-      + (byEstado.ENVIADO_ADC || 0) + (byEstado.VALIDADO_ADC || 0) + (byEstado.RECHAZADO_ADC || 0)
-    const enADC = (byEstado.ENVIADO_ADC || 0) + (byEstado.VALIDADO_ADC || 0) + (byEstado.RECHAZADO_ADC || 0)
+    const pendientes = (byEstado.PENDIENTE || 0) + (byEstado.EN_REVISION || 0)
+    const aprobados = (byEstado.APROBADO_JEFE || 0)
+    const noAprobados = (byEstado.RECHAZADO || 0)
+    const enProceso = (byEstado.ENVIADO_ADC || 0) + (byEstado.VALIDADO_ADC || 0)
+      + (byEstado.RECHAZADO_ADC || 0) + (byEstado.CONTACTADO || 0) + (byEstado.APROBADO || 0)
+    const contratados = byEstado.CONTRATADO || 0
+    const noContratados = byEstado.NO_CONTRATADO || 0
+    const listaEspera = byEstado.LISTA_ESPERA || 0
 
     const ms = Date.now() - t0
     console.log(`[req:${req.id || '-'}] [getStats] OK in ${ms}ms total=${total}`)
@@ -112,8 +120,11 @@ async function getStats(req, res) {
       total,
       pendientes,
       aprobados,
+      noAprobados,
       enProceso,
-      enADC,
+      contratados,
+      noContratados,
+      listaEspera,
       byEstado
     })
   } catch (err) {
@@ -134,12 +145,12 @@ async function create(req, res) {
   const t = await sequelize.transaction()
   try {
     const payload = {
-      nombre: String(req.body.nombre || '').trim(),
+      nombre: String(req.body.nombre || '').trim().toUpperCase(),
       email: req.body.email || null,
       telefono: req.body.telefono || null,
       rut: req.body.rut || null,
-      cargoPostulado: req.body.cargoPostulado || null,
-      observaciones: req.body.observaciones || null,
+      cargoPostulado: req.body.cargoPostulado ? String(req.body.cargoPostulado).trim().toUpperCase() : null,
+      observaciones: req.body.observaciones ? String(req.body.observaciones).trim().toUpperCase() : null,
       nombreReferidor: req.body.nombreReferidor || null,
       estado: ESTADOS.PENDIENTE,
       creadoPorUserId: req.auth.id,
@@ -224,12 +235,12 @@ async function list(req, res) {
     where.creadoPorUserId = Number(createdBy)
   }
 
-  const { roles, hasRRHH, hasADMIN } = rolesFromReq(req)
-  console.log(`[req:${req.id || '-'}] [list] roles=`, roles, 'hasRRHH=', hasRRHH, 'hasADMIN=', hasADMIN, 'pideSoloMis=', pideSoloMis)
+  const { roles, hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  console.log(`[req:${req.id || '-'}] [list] roles=`, roles, 'hasRRHH=', hasRRHH, 'hasADMIN=', hasADMIN, 'hasJefeRRHH=', hasJefeRRHH, 'pideSoloMis=', pideSoloMis)
   console.log(`[req:${req.id || '-'}] [list] where=`, where, 'page=', page, 'limit=', limit)
 
-  // Permiso final: no RRHH/ADMIN y no pidió “solo mis” → 403
-  if (!hasRRHH && !hasADMIN && !pideSoloMis) {
+  // Permiso final: no RRHH/ADMIN/JefeRRHH y no pidió “solo mis” → 403
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH && !pideSoloMis) {
     console.log(`[req:${req.id || '-'}] [list] 403 – no RRHH/ADMIN y no pidió ?mine=1`)
     return res.status(403).json({ error: 'Acceso restringido: usa ?mine=1 para ver tus referidos' })
   }
@@ -321,6 +332,32 @@ async function changeState(req, res) {
       return res.status(404).json({ error: 'No encontrado' })
     }
 
+    // CONTRATADO y NO_CONTRATADO solo se asignan desde el sistema de reclutamiento externo
+    if (nuevoEstado === 'CONTRATADO' || nuevoEstado === 'NO_CONTRATADO') {
+      await t.rollback()
+      console.log(`[req:${req.id || '-'}] [changeState] bloqueado: ${nuevoEstado} solo vía integración externa`)
+      return res.status(400).json({ error: `El estado ${nuevoEstado} solo puede ser asignado por el sistema de reclutamiento externo` })
+    }
+
+    // Solo JefeRRHH (o ADMIN) puede aprobar/rechazar/lista de espera desde EN_REVISION
+    const { hasJefeRRHH, hasADMIN: isAdmin } = rolesFromReq(req)
+    const JEFE_ONLY_TRANSITIONS = ['APROBADO_JEFE', 'LISTA_ESPERA']
+    if (ref.estado === 'EN_REVISION' && JEFE_ONLY_TRANSITIONS.includes(nuevoEstado)) {
+      if (!hasJefeRRHH && !isAdmin) {
+        await t.rollback()
+        console.log(`[req:${req.id || '-'}] [changeState] bloqueado: solo JefeRRHH o ADMIN pueden aprobar/lista de espera`)
+        return res.status(403).json({ error: 'Solo el Jefe RRHH puede aprobar, rechazar o enviar a lista de espera' })
+      }
+    }
+    // Solo JefeRRHH o ADMIN puede rechazar desde EN_REVISION
+    if (ref.estado === 'EN_REVISION' && nuevoEstado === 'RECHAZADO') {
+      if (!hasJefeRRHH && !isAdmin) {
+        await t.rollback()
+        console.log(`[req:${req.id || '-'}] [changeState] bloqueado: solo JefeRRHH o ADMIN pueden rechazar desde EN_REVISION`)
+        return res.status(403).json({ error: 'Solo el Jefe RRHH puede rechazar referidos en revisión' })
+      }
+    }
+
     if (!puedePasar(ref.estado, nuevoEstado)) {
       await t.rollback()
       console.log(`[req:${req.id || '-'}] [changeState] transición inválida ${ref.estado} → ${nuevoEstado}`)
@@ -393,12 +430,12 @@ async function syncFromGmail(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const { roles, hasRRHH, hasADMIN } = rolesFromReq(req)
+  const { roles, hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
 
-  // Solo RRHH o ADMIN pueden sincronizar desde Gmail
-  if (!hasRRHH && !hasADMIN) {
-    console.log(`[req:${req.id || '-'}] [syncFromGmail] 403 – requiere RRHH o ADMIN`)
-    return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH o ADMIN' })
+  // Solo RRHH, JefeRRHH o ADMIN pueden sincronizar desde Gmail
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH) {
+    console.log(`[req:${req.id || '-'}] [syncFromGmail] 403 – requiere RRHH, JefeRRHH o ADMIN`)
+    return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH, JefeRRHH o ADMIN' })
   }
 
   console.log(`[req:${req.id || '-'}] [syncFromGmail] userId=${req.auth.id} body=`, req.body)
@@ -528,9 +565,9 @@ const previewGmailValidators = [
 async function previewGmail(req, res) {
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const { hasRRHH, hasADMIN } = rolesFromReq(req)
-  if (!hasRRHH && !hasADMIN) {
-    return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH o ADMIN' })
+  const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH) {
+    return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH, JefeRRHH o ADMIN' })
   }
 
   // SSE headers
@@ -631,9 +668,9 @@ async function syncFromGmailManual(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const { hasRRHH, hasADMIN } = rolesFromReq(req)
-  if (!hasRRHH && !hasADMIN) {
-    return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH o ADMIN' })
+  const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH) {
+    return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH, JefeRRHH o ADMIN' })
   }
 
   const { referidos: referidosInput } = req.body
@@ -802,9 +839,9 @@ async function enviarADC(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const { hasRRHH, hasADMIN } = rolesFromReq(req)
-  if (!hasRRHH && !hasADMIN) {
-    return res.status(403).json({ error: 'Solo RRHH o ADMIN pueden enviar a ADC' })
+  const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH) {
+    return res.status(403).json({ error: 'Solo RRHH, JefeRRHH o ADMIN pueden enviar a ADC' })
   }
 
   console.log(`[req:${req.id || '-'}] [enviarADC] id=${req.params.id} enviadoADC=${req.body.enviadoADC}`)
@@ -842,9 +879,9 @@ async function asignarADC(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const { hasRRHH, hasADMIN } = rolesFromReq(req)
-  if (!hasRRHH && !hasADMIN) {
-    return res.status(403).json({ error: 'Solo RRHH o ADMIN pueden asignar a ADC' })
+  const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH) {
+    return res.status(403).json({ error: 'Solo RRHH, JefeRRHH o ADMIN pueden asignar a ADC' })
   }
 
   const t = await sequelize.transaction()
@@ -1045,9 +1082,9 @@ async function listarParaADC(req, res) {
 async function listarADCUsuarios(req, res) {
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const { hasRRHH, hasADMIN } = rolesFromReq(req)
-  if (!hasRRHH && !hasADMIN) {
-    return res.status(403).json({ error: 'Solo RRHH o ADMIN' })
+  const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  if (!hasRRHH && !hasADMIN && !hasJefeRRHH) {
+    return res.status(403).json({ error: 'Solo RRHH, JefeRRHH o ADMIN' })
   }
 
   try {

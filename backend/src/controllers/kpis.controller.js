@@ -18,9 +18,13 @@ function buildRange(req) {
   return { from, to }
 }
 
+// Estados terminales positivos y negativos
+const TERMINALES_POSITIVOS = ['APROBADO', 'CONTRATADO']
+const TERMINALES_NEGATIVOS = ['RECHAZADO', 'NO_CONTRATADO']
+const TERMINALES = [...TERMINALES_POSITIVOS, ...TERMINALES_NEGATIVOS]
+
 /**
  * /kpis/overview
- * Conteo por estado + total en rango (por created_at de Referido)
  */
 async function overview(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -41,7 +45,6 @@ async function overview(req, res) {
 
 /**
  * /kpis/series?interval=day|week|month
- * Serie temporal: creados y aprobados por periodo
  */
 async function series(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -58,7 +61,7 @@ async function series(req, res) {
   const approvedSQL = `
     SELECT date_trunc(:interval, h.created_at) AS bucket, COUNT(*)::int AS approved
     FROM estado_historial h
-    WHERE h.hacia = 'APROBADO' AND h.created_at BETWEEN :from AND :to
+    WHERE h.hacia IN ('APROBADO_JEFE', 'APROBADO') AND h.created_at BETWEEN :from AND :to
     GROUP BY 1 ORDER BY 1
   `
 
@@ -67,7 +70,6 @@ async function series(req, res) {
     sequelize.query(approvedSQL, { type: QueryTypes.SELECT, replacements: { from, to, interval } }),
   ])
 
-  // merge left by bucket
   const map = new Map()
   created.forEach(r => map.set(String(r.bucket), { bucket: r.bucket, created: r.created, approved: 0 }))
   approved.forEach(r => {
@@ -81,9 +83,6 @@ async function series(req, res) {
 
 /**
  * /kpis/leadtime
- * Tiempo promedio de permanencia por transición (desde → hacia).
- * Usa LAG para calcular cuánto estuvo un referido en el estado "desde"
- * antes de pasar a "hacia".
  */
 async function leadtime(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -114,7 +113,6 @@ async function leadtime(req, res) {
 
 /**
  * /kpis/funnel
- * Conteo por cada uno de los 8 estados reales
  */
 async function funnel(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -122,14 +120,18 @@ async function funnel(req, res) {
 
   const sql = `
     SELECT
-      SUM(CASE WHEN estado = 'PENDIENTE'     THEN 1 ELSE 0 END)::int AS pendiente,
-      SUM(CASE WHEN estado = 'EN_REVISION'   THEN 1 ELSE 0 END)::int AS "enRevision",
-      SUM(CASE WHEN estado = 'ENVIADO_ADC'   THEN 1 ELSE 0 END)::int AS "enviadoAdc",
-      SUM(CASE WHEN estado = 'VALIDADO_ADC'  THEN 1 ELSE 0 END)::int AS "validadoAdc",
-      SUM(CASE WHEN estado = 'RECHAZADO_ADC' THEN 1 ELSE 0 END)::int AS "rechazadoAdc",
-      SUM(CASE WHEN estado = 'CONTACTADO'    THEN 1 ELSE 0 END)::int AS contactado,
-      SUM(CASE WHEN estado = 'APROBADO'      THEN 1 ELSE 0 END)::int AS aprobado,
-      SUM(CASE WHEN estado = 'RECHAZADO'     THEN 1 ELSE 0 END)::int AS rechazado
+      SUM(CASE WHEN estado = 'PENDIENTE'      THEN 1 ELSE 0 END)::int AS pendiente,
+      SUM(CASE WHEN estado = 'EN_REVISION'    THEN 1 ELSE 0 END)::int AS "enRevision",
+      SUM(CASE WHEN estado = 'APROBADO_JEFE'  THEN 1 ELSE 0 END)::int AS "aprobadoJefe",
+      SUM(CASE WHEN estado = 'LISTA_ESPERA'   THEN 1 ELSE 0 END)::int AS "listaEspera",
+      SUM(CASE WHEN estado = 'ENVIADO_ADC'    THEN 1 ELSE 0 END)::int AS "enviadoAdc",
+      SUM(CASE WHEN estado = 'VALIDADO_ADC'   THEN 1 ELSE 0 END)::int AS "validadoAdc",
+      SUM(CASE WHEN estado = 'RECHAZADO_ADC'  THEN 1 ELSE 0 END)::int AS "rechazadoAdc",
+      SUM(CASE WHEN estado = 'CONTACTADO'     THEN 1 ELSE 0 END)::int AS contactado,
+      SUM(CASE WHEN estado = 'APROBADO'       THEN 1 ELSE 0 END)::int AS aprobado,
+      SUM(CASE WHEN estado = 'RECHAZADO'      THEN 1 ELSE 0 END)::int AS rechazado,
+      SUM(CASE WHEN estado = 'CONTRATADO'     THEN 1 ELSE 0 END)::int AS contratado,
+      SUM(CASE WHEN estado = 'NO_CONTRATADO'  THEN 1 ELSE 0 END)::int AS "noContratado"
     FROM referidos
     WHERE created_at BETWEEN :from AND :to
   `
@@ -139,7 +141,6 @@ async function funnel(req, res) {
 
 /**
  * /kpis/conversion-rate
- * Tasa de conversión y rechazo con delta respecto al período anterior
  */
 async function conversionRate(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -152,8 +153,9 @@ async function conversionRate(req, res) {
   const sql = `
     SELECT
       COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE estado = 'APROBADO')::int  AS aprobados,
-      COUNT(*) FILTER (WHERE estado = 'RECHAZADO')::int AS rechazados
+      COUNT(*) FILTER (WHERE estado IN ('APROBADO_JEFE','APROBADO','CONTRATADO'))::int AS aprobados,
+      COUNT(*) FILTER (WHERE estado IN ('RECHAZADO','NO_CONTRATADO'))::int AS rechazados,
+      COUNT(*) FILTER (WHERE estado = 'CONTRATADO')::int AS contratados
     FROM referidos
     WHERE created_at BETWEEN :from AND :to
   `
@@ -166,10 +168,11 @@ async function conversionRate(req, res) {
   const cur = current[0]
   const prev = previous[0]
 
-  const conversionRate = cur.total > 0 ? (cur.aprobados / cur.total) * 100 : 0
-  const rejectionRate = cur.total > 0 ? (cur.rechazados / cur.total) * 100 : 0
-  const prevConversionRate = prev.total > 0 ? (prev.aprobados / prev.total) * 100 : 0
-  const prevRejectionRate = prev.total > 0 ? (prev.rechazados / prev.total) * 100 : 0
+  const rate = cur.total > 0 ? (cur.aprobados / cur.total) * 100 : 0
+  const rejRate = cur.total > 0 ? (cur.rechazados / cur.total) * 100 : 0
+  const hireRate = cur.total > 0 ? (cur.contratados / cur.total) * 100 : 0
+  const prevRate = prev.total > 0 ? (prev.aprobados / prev.total) * 100 : 0
+  const prevRejRate = prev.total > 0 ? (prev.rechazados / prev.total) * 100 : 0
 
   const inProcess = cur.total - cur.aprobados - cur.rechazados
 
@@ -178,19 +181,20 @@ async function conversionRate(req, res) {
     total: cur.total,
     aprobados: cur.aprobados,
     rechazados: cur.rechazados,
+    contratados: cur.contratados,
     inProcess,
-    conversionRate: +conversionRate.toFixed(2),
-    rejectionRate: +rejectionRate.toFixed(2),
+    conversionRate: +rate.toFixed(2),
+    rejectionRate: +rejRate.toFixed(2),
+    hireRate: +hireRate.toFixed(2),
     delta: {
-      conversion: +(conversionRate - prevConversionRate).toFixed(2),
-      rejection: +(rejectionRate - prevRejectionRate).toFixed(2),
+      conversion: +(rate - prevRate).toFixed(2),
+      rejection: +(rejRate - prevRejRate).toFixed(2),
     }
   })
 }
 
 /**
  * /kpis/top-referrers
- * Top 10 usuarios que más referidos crearon en el período
  */
 async function topReferrers(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -202,9 +206,10 @@ async function topReferrers(req, res) {
       u.username           AS nombre,
       u.profile_picture    AS avatar,
       COUNT(*)::int        AS total,
-      COUNT(*) FILTER (WHERE r.estado = 'APROBADO')::int AS aprobados,
+      COUNT(*) FILTER (WHERE r.estado IN ('APROBADO_JEFE','APROBADO','CONTRATADO'))::int AS aprobados,
+      COUNT(*) FILTER (WHERE r.estado = 'CONTRATADO')::int AS contratados,
       CASE WHEN COUNT(*) > 0
-        THEN ROUND((COUNT(*) FILTER (WHERE r.estado = 'APROBADO')::numeric / COUNT(*)) * 100, 1)
+        THEN ROUND((COUNT(*) FILTER (WHERE r.estado IN ('APROBADO_JEFE','APROBADO','CONTRATADO'))::numeric / COUNT(*)) * 100, 1)
         ELSE 0
       END AS tasa
     FROM referidos r
@@ -220,7 +225,6 @@ async function topReferrers(req, res) {
 
 /**
  * /kpis/by-unit
- * Referidos agrupados por unidad de negocio
  */
 async function byUnit(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -231,9 +235,9 @@ async function byUnit(req, res) {
       un.id,
       un.nombre,
       COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE r.estado = 'APROBADO')::int  AS aprobados,
-      COUNT(*) FILTER (WHERE r.estado = 'RECHAZADO')::int AS rechazados,
-      COUNT(*) FILTER (WHERE r.estado NOT IN ('APROBADO','RECHAZADO'))::int AS en_proceso
+      COUNT(*) FILTER (WHERE r.estado IN ('APROBADO_JEFE','APROBADO','CONTRATADO'))::int AS aprobados,
+      COUNT(*) FILTER (WHERE r.estado IN ('RECHAZADO','NO_CONTRATADO'))::int AS rechazados,
+      COUNT(*) FILTER (WHERE r.estado NOT IN ('APROBADO_JEFE','APROBADO','CONTRATADO','RECHAZADO','NO_CONTRATADO'))::int AS en_proceso
     FROM referidos r
     JOIN unidad_negocio un ON un.id = r.unidad_negocio_id
     WHERE r.created_at BETWEEN :from AND :to
@@ -246,7 +250,6 @@ async function byUnit(req, res) {
 
 /**
  * /kpis/sla
- * % de referidos procesados dentro del SLA (72h default)
  */
 async function sla(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
@@ -260,7 +263,7 @@ async function sla(req, res) {
         estado,
         EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600.0 AS hours
       FROM referidos
-      WHERE estado IN ('APROBADO','RECHAZADO')
+      WHERE estado IN ('APROBADO','RECHAZADO','CONTRATADO','NO_CONTRATADO')
         AND created_at BETWEEN :from AND :to
     )
     SELECT

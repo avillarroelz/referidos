@@ -15,14 +15,23 @@ const app = express()
 // Security
 app.use(helmet())
 
-// CORS configuration for multiple origins
-const corsOrigins = config.corsOrigin ? config.corsOrigin.split(',').map(o => o.trim()) : ['*']
+// CORS configuration
+const corsOrigins = config.corsOrigin
+  ? config.corsOrigin.split(',').map(o => o.trim()).filter(o => o !== '*')
+  : []
+
+if (corsOrigins.length === 0) {
+  console.warn('⚠️  SEGURIDAD: CORS_ORIGIN no configurado o es "*". En producción define orígenes específicos.')
+}
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
+    // Permitir requests sin origin (mobile apps, curl, server-to-server)
     if (!origin) return callback(null, true)
-
-    if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
+    // Si no hay orígenes configurados (dev), permitir todo
+    if (corsOrigins.length === 0) return callback(null, true)
+    // Verificar contra lista blanca
+    if (corsOrigins.includes(origin)) {
       callback(null, true)
     } else {
       callback(new Error('Not allowed by CORS'))

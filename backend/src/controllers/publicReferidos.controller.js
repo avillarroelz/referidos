@@ -11,12 +11,16 @@ const EstadoHistorial = () => getModel('EstadoHistorial')
 // Validadores
 
 const crearPublicoValidators = [
-  body('nombre').isString().notEmpty().withMessage('nombre es obligatorio'),
-  body('email').optional().isEmail().withMessage('email inválido'),
-  body('telefono').optional().isString(),
-  body('rut').optional().isString(),
-  body('cargoPostulado').optional().isString(),
-  body('observaciones').optional().isString(),
+  body('nombre').isString().notEmpty().trim().escape().isLength({ max: 100 }).withMessage('nombre es obligatorio (máx 100 caracteres)'),
+  body('segundoNombre').optional().isString().trim().escape().isLength({ max: 100 }),
+  body('apellidoPaterno').optional().isString().trim().escape().isLength({ max: 100 }),
+  body('apellidoMaterno').optional().isString().trim().escape().isLength({ max: 100 }),
+  body('fechaNacimiento').optional().isISO8601().withMessage('fecha de nacimiento inválida'),
+  body('email').optional().isEmail().normalizeEmail().withMessage('email inválido'),
+  body('telefono').optional().isString().trim().isLength({ max: 30 }),
+  body('rut').optional().isString().trim().isLength({ max: 20 }),
+  body('cargoPostulado').optional().isString().trim().escape().isLength({ max: 200 }),
+  body('observaciones').optional().isString().trim().escape().isLength({ max: 1000 }),
   body('nombreReferidor').optional().isString(),
 ]
 
@@ -56,13 +60,28 @@ async function crearPublico(req, res) {
       return res.status(500).json({ error: 'No hay usuarios administrativos configurados' })
     }
 
+    // Construir nombre completo a partir de los campos individuales
+    const partes = [
+      req.body.nombre,
+      req.body.segundoNombre,
+      req.body.apellidoPaterno,
+      req.body.apellidoMaterno,
+    ].filter(Boolean).map(s => String(s).trim().toUpperCase())
+    const nombreCompleto = partes.join(' ')
+
+    // Guardar datos adicionales en observaciones si existen
+    const obs = []
+    if (req.body.fechaNacimiento) obs.push(`FECHA NAC: ${req.body.fechaNacimiento}`)
+    if (req.body.observaciones) obs.push(String(req.body.observaciones).trim().toUpperCase())
+    const observacionesFinal = obs.length > 0 ? obs.join(' | ') : null
+
     const ref = await Referido().create({
-      nombre: String(req.body.nombre || '').trim(),
+      nombre: nombreCompleto,
       email: req.body.email || null,
       telefono: req.body.telefono || null,
       rut: req.body.rut || null,
-      cargoPostulado: req.body.cargoPostulado || null,
-      observaciones: req.body.observaciones || null,
+      cargoPostulado: req.body.cargoPostulado ? String(req.body.cargoPostulado).trim().toUpperCase() : null,
+      observaciones: observacionesFinal,
       nombreReferidor: req.body.nombreReferidor || null,
       estado: ESTADOS.PENDIENTE,
       creadoPorUserId: creadorId,

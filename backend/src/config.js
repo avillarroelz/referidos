@@ -16,11 +16,11 @@ const config = {
     sslCaPath: process.env.DB_SSL_CA
   },
   
-  // JWT
+  // JWT — en producción DEBEN configurarse secrets fuertes y diferentes
   jwt: {
-    secret: process.env.JWT_SECRET || 'devsecret',
+    secret: process.env.JWT_SECRET || 'devsecret-change-me-in-production',
     expiresIn: process.env.JWT_EXPIRES_IN || '8h',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'devrefresh',
+    refreshSecret: process.env.JWT_REFRESH_SECRET || 'devrefresh-change-me-in-production',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
   },
   
