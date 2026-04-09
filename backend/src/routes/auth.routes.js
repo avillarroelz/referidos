@@ -1,7 +1,7 @@
 // backend/src/routes/auth.routes.js
 const router = require('express').Router()
 const { authRequired } = require('../middleware/auth')
-const { authLoginLimiter, authRegisterLimiter } = require('../middleware/rateLimiters')
+const { authLoginLimiter, authRegisterLimiter, authRefreshLimiter } = require('../middleware/rateLimiters')
 const {
   login,
   loginValidators,
@@ -15,10 +15,10 @@ const {
   googleExchange
 } = require('../controllers/auth.controller')
 
-// Rutas públicas (con rate limiting estricto)
+// Rutas públicas (cada una con su rate limiter específico)
 router.post('/login', authLoginLimiter, loginValidators, login)
 router.post('/register', authRegisterLimiter, registerValidators, register)
-router.post('/refresh', authLoginLimiter, refreshValidators, refresh)
+router.post('/refresh', authRefreshLimiter, refreshValidators, refresh)
 
 // Rutas de Google OAuth
 router.get('/google', googleLogin)

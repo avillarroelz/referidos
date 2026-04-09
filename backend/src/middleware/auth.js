@@ -53,11 +53,7 @@ function requireRoles(...requiredRoles) {
 
     if (!hasRole) {
       console.log(`[roles] Acceso denegado. Requeridos: [${requiredRoles.join(',')}], Usuario: [${userRoles.join(',')}]`)
-      return res.status(403).json({ 
-        error: 'Sin permisos suficientes',
-        required: requiredRoles,
-        current: userRoles
-      })
+      return res.status(403).json({ error: 'Sin permisos suficientes' })
     }
 
     next()

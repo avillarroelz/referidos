@@ -56,7 +56,7 @@ function storeOAuthCode(tokens) {
 
 const loginValidators = [
   body('correo').isEmail().withMessage('Correo inválido'),
-  body('password').isString().isLength({ min: 8 }).withMessage('Contraseña mínimo 8 caracteres'),
+  body('password').isString().isLength({ min: 12 }).withMessage('Contraseña mínimo 12 caracteres'),
 ]
 
 async function login(req, res) {
@@ -134,7 +134,12 @@ async function login(req, res) {
 const registerValidators = [
   body('username').isString().notEmpty().withMessage('Username requerido'),
   body('correo').isEmail().withMessage('Correo inválido'),
-  body('password').isString().isLength({ min: 8 }).withMessage('Contraseña mínimo 8 caracteres'),
+  body('password')
+    .isString()
+    .isLength({ min: 12 }).withMessage('Contraseña mínimo 12 caracteres')
+    .matches(/[A-Z]/).withMessage('Debe contener al menos una mayúscula')
+    .matches(/[a-z]/).withMessage('Debe contener al menos una minúscula')
+    .matches(/[0-9]/).withMessage('Debe contener al menos un número'),
 ]
 
 async function register(req, res) {

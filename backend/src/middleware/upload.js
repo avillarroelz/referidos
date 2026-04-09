@@ -15,9 +15,11 @@ function storageFor(subfolder) {
   })
 }
 
+const ALLOWED_EXTENSIONS = /\.(pdf|doc|docx|jpg|jpeg|png)$/i
+
 const limits = { fileSize: 10 * 1024 * 1024 } // 10MB
 const fileFilter = (_req, file, cb) => {
-  // whitelist de tipos de archivo permitidos
+  // whitelist de tipos MIME + extensión (doble validación como backendDesv)
   const allowedMimeTypes = [
     'application/pdf',
     'image/png',
@@ -26,8 +28,10 @@ const fileFilter = (_req, file, cb) => {
     'application/msword', // .doc
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
   ]
-  const ok = allowedMimeTypes.includes(file.mimetype)
-  cb(ok ? null : new Error('Tipo de archivo no permitido'), ok)
+  const mimeOk = allowedMimeTypes.includes(file.mimetype)
+  const extOk = ALLOWED_EXTENSIONS.test(file.originalname)
+  const ok = mimeOk && extOk
+  cb(ok ? null : new Error('Tipo de archivo no permitido. Solo se aceptan: PDF, Word e imágenes (JPG/PNG).'), ok)
 }
 
 function uploader(subfolder) {

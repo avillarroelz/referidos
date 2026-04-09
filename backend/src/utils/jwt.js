@@ -7,7 +7,8 @@ const { config } = require('../config')
  */
 function generateAccessToken(payload) {
   return jwt.sign(payload, config.jwt.secret, {
-    expiresIn: config.jwt.expiresIn
+    expiresIn: config.jwt.expiresIn,
+    algorithm: config.jwt.algorithm
   })
 }
 
@@ -16,7 +17,8 @@ function generateAccessToken(payload) {
  */
 function generateRefreshToken(payload) {
   return jwt.sign(payload, config.jwt.refreshSecret, {
-    expiresIn: config.jwt.refreshExpiresIn
+    expiresIn: config.jwt.refreshExpiresIn,
+    algorithm: config.jwt.algorithm
   })
 }
 
@@ -25,7 +27,7 @@ function generateRefreshToken(payload) {
  */
 function verifyAccessToken(token) {
   try {
-    return { valid: true, decoded: jwt.verify(token, config.jwt.secret) }
+    return { valid: true, decoded: jwt.verify(token, config.jwt.secret, { algorithms: [config.jwt.algorithm] }) }
   } catch (error) {
     return { valid: false, error: error.message }
   }
@@ -36,7 +38,7 @@ function verifyAccessToken(token) {
  */
 function verifyRefreshToken(token) {
   try {
-    return { valid: true, decoded: jwt.verify(token, config.jwt.refreshSecret) }
+    return { valid: true, decoded: jwt.verify(token, config.jwt.refreshSecret, { algorithms: [config.jwt.algorithm] }) }
   } catch (error) {
     return { valid: false, error: error.message }
   }
