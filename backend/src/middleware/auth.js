@@ -6,15 +6,18 @@ const { getModel } = require('../db')
  * Middleware que requiere autenticación JWT
  */
 function authRequired(req, res, next) {
-  // Extraer token del header Authorization o query string
+  // Prioridad: 1) Cookie httpOnly, 2) Header Authorization, 3) Query string (descargas)
   let token = null
-  const authHeader = req.header('Authorization')
 
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.replace('Bearer ', '')
-  } else if (req.query.token) {
-    // Permitir token por query string para descargas
-    token = req.query.token
+  if (req.cookies?.__access_token) {
+    token = req.cookies.__access_token
+  } else {
+    const authHeader = req.header('Authorization')
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.replace('Bearer ', '')
+    } else if (req.query.token) {
+      token = req.query.token
+    }
   }
 
   if (!token) {

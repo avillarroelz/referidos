@@ -4,22 +4,48 @@ const { body, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { compare, hash } = require('../utils/hash')
 const { generateTokens, verifyRefreshToken, generateAccessToken } = require('../utils/jwt')
+const { config } = require('../config')
 const googleAuthService = require('../services/googleAuthService')
 
 const Usuario = getModel('Usuario')
+
+// ──────────────────────────────────────────────────────────────
+// Cookie helpers (patrón WebEcora/backendDesv)
+// ──────────────────────────────────────────────────────────────
+
+const COOKIE_OPTS = {
+  httpOnly: true,
+  secure: config.isProd,
+  sameSite: config.isProd ? 'strict' : 'lax',
+  path: '/',
+}
+
+function setAuthCookies(res, accessToken, refreshToken) {
+  res.cookie('__access_token', accessToken, {
+    ...COOKIE_OPTS,
+    maxAge: 20 * 60 * 1000, // 20 min (match JWT_EXPIRES_IN)
+  })
+  res.cookie('__refresh_token', refreshToken, {
+    ...COOKIE_OPTS,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días (match JWT_REFRESH_EXPIRES_IN)
+  })
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie('__access_token', { ...COOKIE_OPTS })
+  res.clearCookie('__refresh_token', { ...COOKIE_OPTS })
+}
 
 // Detectar URL del frontend basado en el referer o CORS_ORIGIN
 function getFrontendUrl(req) {
   const referer = req.headers.referer || req.headers.origin || ''
   const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map(s => s.trim())
 
-  // Si el referer coincide con algún origen permitido, usarlo
   for (const origin of allowedOrigins) {
     if (referer.startsWith(origin)) return origin
   }
 
-  // Fallback: detectar si el request viene por IP y construir URL con el mismo host
-  const host = req.headers.host // e.g. "10.10.10.103:4000"
+  const host = req.headers.host
   if (host && !host.includes('localhost')) {
     const hostname = host.split(':')[0]
     return `http://${hostname}:5173`
@@ -43,9 +69,9 @@ function buildRedirectPage(url) {
 
 // Store temporal para códigos OAuth (TTL 60s)
 const oauthCodes = new Map()
-function storeOAuthCode(tokens) {
+function storeOAuthCode(data) {
   const code = crypto.randomBytes(32).toString('hex')
-  oauthCodes.set(code, tokens)
+  oauthCodes.set(code, data)
   setTimeout(() => oauthCodes.delete(code), 60000)
   return code
 }
@@ -68,7 +94,6 @@ async function login(req, res) {
   const { correo, password } = req.body
 
   try {
-    // Buscar usuario con roles y unidades de negocio
     const user = await Usuario.findOne({
       where: { correo },
       include: [
@@ -85,34 +110,25 @@ async function login(req, res) {
       return res.status(403).json({ error: 'Usuario deshabilitado' })
     }
 
-    // Verificar contraseña
     const passwordOk = await compare(password, user.password)
     if (!passwordOk) {
       return res.status(401).json({ error: 'Credenciales inválidas' })
     }
 
-    // Preparar payload
     const roles = (user.roles || []).map(r => r.nombre)
     const unidadNegocioIds = (user.unidadNegocios || []).map(u => u.id)
-    const payload = {
-      id: user.id,
-      correo: user.correo,
-      username: user.username,
-      roles,
-      unidadNegocioIds
-    }
+    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds }
 
-    // Generar tokens
     const { accessToken, refreshToken } = generateTokens(payload)
 
-    // Actualizar last_login
     await user.update({ last_login: new Date() })
+
+    // Tokens en httpOnly cookies (no en el body)
+    setAuthCookies(res, accessToken, refreshToken)
 
     console.log(`[auth] Login exitoso: ${correo}`)
 
     res.json({
-      accessToken,
-      refreshToken,
       user: {
         id: user.id,
         username: user.username,
@@ -151,13 +167,11 @@ async function register(req, res) {
   const { username, correo, password } = req.body
 
   try {
-    // Verificar si ya existe
     const exists = await Usuario.findOne({ where: { correo } })
     if (exists) {
       return res.status(409).json({ error: 'El correo ya está registrado' })
     }
 
-    // Crear usuario
     const passwordHashed = await hash(password)
     const user = await Usuario.create({
       username: username.trim(),
@@ -166,7 +180,6 @@ async function register(req, res) {
       estado: true
     })
 
-    // Asignar rol por defecto (TRABAJADOR)
     const Rol = getModel('Rol')
     const trabajadorRole = await Rol.findOne({ where: { nombre: 'TRABAJADOR' } })
     if (trabajadorRole) {
@@ -188,28 +201,24 @@ async function register(req, res) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// REFRESH TOKEN
+// REFRESH TOKEN (lee refresh de cookie, no del body)
 // ──────────────────────────────────────────────────────────────
 
-const refreshValidators = [
-  body('refreshToken').isString().notEmpty().withMessage('Refresh token requerido')
-]
-
 async function refresh(req, res) {
-  const errors = validationResult(req)
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() })
+  // Leer refresh token desde cookie httpOnly
+  const refreshTokenValue = req.cookies?.__refresh_token
+  if (!refreshTokenValue) {
+    return res.status(401).json({ error: 'Refresh token no proporcionado' })
   }
 
-  const { refreshToken } = req.body
-  const { valid, decoded, error } = verifyRefreshToken(refreshToken)
+  const { valid, decoded, error } = verifyRefreshToken(refreshTokenValue)
 
   if (!valid) {
+    clearAuthCookies(res)
     return res.status(401).json({ error: 'Refresh token inválido o expirado' })
   }
 
   try {
-    // Verificar que el usuario aún existe y está activo
     const user = await Usuario.findOne({
       where: { id: decoded.id },
       include: [
@@ -219,29 +228,38 @@ async function refresh(req, res) {
     })
 
     if (!user || user.estado === false) {
+      clearAuthCookies(res)
       return res.status(401).json({ error: 'Usuario no válido' })
     }
 
-    // Generar nuevo access token
     const roles = (user.roles || []).map(r => r.nombre)
     const unidadNegocioIds = (user.unidadNegocios || []).map(u => u.id)
-    const payload = {
-      id: user.id,
-      correo: user.correo,
-      username: user.username,
-      roles,
-      unidadNegocioIds
-    }
+    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds }
 
     const accessToken = generateAccessToken(payload)
 
+    // Actualizar cookie de access token
+    res.cookie('__access_token', accessToken, {
+      ...COOKIE_OPTS,
+      maxAge: 20 * 60 * 1000,
+    })
+
     console.log(`[auth] Token renovado para: ${user.correo}`)
 
-    res.json({ accessToken })
+    res.json({ ok: true })
   } catch (error) {
     console.error('[auth] Error en refresh:', error)
     res.status(500).json({ error: 'Error interno del servidor' })
   }
+}
+
+// ──────────────────────────────────────────────────────────────
+// LOGOUT (limpiar cookies)
+// ──────────────────────────────────────────────────────────────
+
+function logout(_req, res) {
+  clearAuthCookies(res)
+  res.json({ ok: true })
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -285,10 +303,6 @@ async function me(req, res) {
 // GOOGLE OAUTH LOGIN
 // ──────────────────────────────────────────────────────────────
 
-/**
- * Iniciar el flujo de OAuth con Google
- * Redirige al usuario a la página de autorización de Google
- */
 async function googleLogin(req, res) {
   try {
     const authUrl = googleAuthService.getAuthUrl()
@@ -299,10 +313,6 @@ async function googleLogin(req, res) {
   }
 }
 
-/**
- * Callback de Google OAuth
- * Recibe el código de autorización y crea/actualiza el usuario
- */
 async function googleCallback(req, res) {
   const { code } = req.query
 
@@ -311,13 +321,9 @@ async function googleCallback(req, res) {
   }
 
   try {
-    // Obtener tokens de Google
     const tokens = await googleAuthService.getTokensFromCode(code)
-
-    // Obtener información del usuario
     const googleUser = await googleAuthService.getUserInfo(tokens.access_token)
 
-    // Buscar o crear usuario
     let user = await Usuario.findOne({
       where: { google_id: googleUser.googleId },
       include: [
@@ -327,7 +333,6 @@ async function googleCallback(req, res) {
     })
 
     if (!user) {
-      // Verificar si existe un usuario con ese email (migración de cuenta local a Google)
       user = await Usuario.findOne({
         where: { correo: googleUser.email },
         include: [
@@ -337,7 +342,6 @@ async function googleCallback(req, res) {
       })
 
       if (user) {
-        // Usuario existe pero no tiene Google ID, actualizar
         await user.update({
           google_id: googleUser.googleId,
           google_refresh_token: tokens.refresh_token,
@@ -346,7 +350,6 @@ async function googleCallback(req, res) {
           last_login: new Date()
         })
       } else {
-        // Crear nuevo usuario
         user = await Usuario.create({
           username: googleUser.name,
           correo: googleUser.email,
@@ -358,14 +361,12 @@ async function googleCallback(req, res) {
           last_login: new Date()
         })
 
-        // Asignar rol por defecto (TRABAJADOR)
         const Rol = getModel('Rol')
         const trabajadorRole = await Rol.findOne({ where: { nombre: 'TRABAJADOR' } })
         if (trabajadorRole) {
           await user.addRole(trabajadorRole)
         }
 
-        // Recargar usuario con roles y unidades
         await user.reload({
           include: [
             { association: 'roles' },
@@ -374,7 +375,6 @@ async function googleCallback(req, res) {
         })
       }
     } else {
-      // Usuario ya existe, actualizar tokens y última conexión
       await user.update({
         google_refresh_token: tokens.refresh_token,
         profile_picture: googleUser.picture,
@@ -382,52 +382,29 @@ async function googleCallback(req, res) {
       })
     }
 
-    // Verificar estado del usuario
     if (user.estado === false) {
       return res.status(403).json({ error: 'Usuario deshabilitado' })
     }
 
-    // Preparar payload y generar tokens JWT
     const roles = (user.roles || []).map(r => r.nombre)
     const unidadNegocioIds = (user.unidadNegocios || []).map(u => u.id)
-    const payload = {
-      id: user.id,
-      correo: user.correo,
-      username: user.username,
-      roles,
-      unidadNegocioIds
-    }
+    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds }
 
     const { accessToken, refreshToken } = generateTokens(payload)
 
+    // Setear cookies httpOnly directamente en el callback
+    setAuthCookies(res, accessToken, refreshToken)
+
     console.log(`[auth] Login con Google exitoso: ${user.correo}`)
 
-    // Guardar tokens con código temporal y redirigir con página HTML
-    const tempCode = storeOAuthCode({ accessToken, refreshToken })
+    // Redirigir al frontend (las cookies ya están seteadas)
     const frontendUrl = getFrontendUrl(req)
-    const redirectUrl = `${frontendUrl}/auth/google/callback?code=${tempCode}`
-    res.send(buildRedirectPage(redirectUrl))
+    res.send(buildRedirectPage(`${frontendUrl}/auth/google/callback`))
   } catch (error) {
     console.error('[auth] Error en callback de Google:', error)
     const frontendUrl = getFrontendUrl(req)
     res.send(buildRedirectPage(`${frontendUrl}/login?error=google_auth_failed`))
   }
-}
-
-/**
- * Intercambiar código temporal por tokens JWT
- */
-async function googleExchange(req, res) {
-  const { code } = req.body
-
-  if (!code || !oauthCodes.has(code)) {
-    return res.status(400).json({ error: 'Código inválido o expirado' })
-  }
-
-  const tokens = oauthCodes.get(code)
-  oauthCodes.delete(code)
-
-  res.json(tokens)
 }
 
 module.exports = {
@@ -436,9 +413,8 @@ module.exports = {
   register,
   registerValidators,
   refresh,
-  refreshValidators,
   me,
+  logout,
   googleLogin,
   googleCallback,
-  googleExchange
 }
