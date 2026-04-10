@@ -77,7 +77,7 @@ async function bootstrap(){
           password: await hash(config.adminPass),
           estado:true
         })
-        console.log(`👑 Admin creado: ${config.adminEmail} / ${config.adminPass}`)
+        console.log(`👑 Admin creado: ${config.adminEmail} (contraseña configurada en .env)`)
       }
     }
 

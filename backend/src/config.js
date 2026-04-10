@@ -22,9 +22,17 @@ const config = {
 
   // JWT — en producción DEBEN configurarse secrets fuertes y diferentes
   jwt: {
-    secret: process.env.JWT_SECRET || 'devsecret-change-me-in-production',
+    secret: (() => {
+      const s = process.env.JWT_SECRET
+      if (!s && isProd) { console.error('❌ JWT_SECRET no configurado en producción'); process.exit(1) }
+      return s || 'devsecret-change-me-in-production'
+    })(),
     expiresIn: process.env.JWT_EXPIRES_IN || '20m',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'devrefresh-change-me-in-production',
+    refreshSecret: (() => {
+      const s = process.env.JWT_REFRESH_SECRET
+      if (!s && isProd) { console.error('❌ JWT_REFRESH_SECRET no configurado en producción'); process.exit(1) }
+      return s || 'devrefresh-change-me-in-production'
+    })(),
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
     algorithm: 'HS256'
   },

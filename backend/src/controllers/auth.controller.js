@@ -103,15 +103,18 @@ async function login(req, res) {
     })
 
     if (!user) {
+      console.warn(`[auth] Login fallido (usuario no existe): correo=${correo} ip=${req.ip} ua=${req.headers['user-agent']}`)
       return res.status(401).json({ error: 'Credenciales inválidas' })
     }
 
     if (user.estado === false) {
+      console.warn(`[auth] Login bloqueado (deshabilitado): correo=${correo} ip=${req.ip}`)
       return res.status(403).json({ error: 'Usuario deshabilitado' })
     }
 
     const passwordOk = await compare(password, user.password)
     if (!passwordOk) {
+      console.warn(`[auth] Login fallido (contraseña incorrecta): correo=${correo} ip=${req.ip} ua=${req.headers['user-agent']}`)
       return res.status(401).json({ error: 'Credenciales inválidas' })
     }
 
