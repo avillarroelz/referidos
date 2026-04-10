@@ -23,7 +23,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: config.isProd ? ["'self'"] : ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: config.isProd ? ["'self'"] : ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https:'],
       connectSrc: ["'self'"],
       fontSrc: ["'self'"],
@@ -42,6 +42,10 @@ const corsOrigins = config.corsOrigin
   : []
 
 if (corsOrigins.length === 0) {
+  if (config.isProd) {
+    console.error('❌ SEGURIDAD: CORS_ORIGIN no configurado en producción. Abortando.')
+    process.exit(1)
+  }
   console.warn('⚠️  SEGURIDAD: CORS_ORIGIN no configurado o es "*". En producción define orígenes específicos.')
 }
 
@@ -104,8 +108,9 @@ app.use('/api/', globalLimiter)
 app.use(morgan(config.isProd ? 'combined' : 'dev'))
 app.use(require('./middleware/requestLogger')())
 
-// ─── Static files ─────────────────────────────────────────────
-app.use('/uploads', express.static(UPLOAD_DIR))
+// ─── Static files (protegidos con auth) ───────────────────────
+const { authRequired } = require('./middleware/auth')
+app.use('/uploads', authRequired, express.static(UPLOAD_DIR))
 
 // ─── Routes ───────────────────────────────────────────────────
 app.use('/api', routes)
