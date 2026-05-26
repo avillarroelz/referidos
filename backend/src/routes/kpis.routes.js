@@ -3,7 +3,7 @@ const router = require('express').Router()
 const { authRequired, requireRoles } = require('../middleware/auth')
 const ctrl = require('../controllers/kpis.controller')
 
-router.use(authRequired, requireRoles('ADMIN','RRHH'))
+router.use(authRequired, requireRoles('ADMIN','RRHH','JefeRRHH'))
 
 router.get('/overview',        ctrl.rangeValidators, ctrl.overview)
 router.get('/series',          ctrl.rangeValidators, ctrl.series)

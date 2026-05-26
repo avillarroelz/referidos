@@ -17,17 +17,20 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Rutas de alta frecuencia de workflow (solo si autenticado)
+    // Nota: montado en /api/, así que req.path es relativo (ej: /auth/me)
     const isHighFrequencyRoute =
-      req.path.startsWith('/api/referidos') ||
-      req.path.startsWith('/api/kpis') ||
-      req.path.startsWith('/api/notificaciones')
+      req.path.startsWith('/referidos') ||
+      req.path.startsWith('/kpis') ||
+      req.path.startsWith('/notificaciones')
 
-    const hasAuthToken = req.headers.authorization?.startsWith('Bearer ')
+    const hasAuthToken =
+      req.headers.authorization?.startsWith('Bearer ') ||
+      !!req.cookies?.__access_token
 
     return (
-      req.path === '/api/health' ||
-      req.path.startsWith('/api/auth/') ||
+      req.path === '/health' ||
+      req.path === '/csrf-token' ||
+      req.path.startsWith('/auth/') ||
       (isHighFrequencyRoute && hasAuthToken)
     )
   },

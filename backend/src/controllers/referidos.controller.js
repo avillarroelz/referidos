@@ -307,7 +307,7 @@ async function getById(req, res) {
     // Verificar autorización: RRHH/ADMIN/JefeRRHH ven todo, el resto solo los suyos
     const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
     const isOwner = ref.creadoPorUserId === req.auth.id
-    const isAssignedAdc = ref.adcAsignadoUserId === req.auth.id
+    const isAssignedAdc = ref.asignadoADCUserId === req.auth.id
     if (!hasRRHH && !hasADMIN && !hasJefeRRHH && !isOwner && !isAssignedAdc) {
       console.log(`[req:${req.id || '-'}] [getById] 403 – sin permiso`)
       return res.status(403).json({ error: 'Sin permisos para ver este referido' })
@@ -413,12 +413,12 @@ async function getHistorial(req, res) {
 
   try {
     // Verificar autorización antes de devolver historial
-    const ref = await Referido.findByPk(Number(req.params.id), { attributes: ['id', 'creadoPorUserId', 'adcAsignadoUserId'] })
+    const ref = await Referido.findByPk(Number(req.params.id), { attributes: ['id', 'creadoPorUserId', 'asignadoADCUserId'] })
     if (!ref) return res.status(404).json({ error: 'Referido no encontrado' })
 
     const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
     const isOwner = ref.creadoPorUserId === req.auth.id
-    const isAssignedAdc = ref.adcAsignadoUserId === req.auth.id
+    const isAssignedAdc = ref.asignadoADCUserId === req.auth.id
     if (!hasRRHH && !hasADMIN && !hasJefeRRHH && !isOwner && !isAssignedAdc) {
       console.log(`[req:${req.id || '-'}] [getHistorial] 403 – sin permiso`)
       return res.status(403).json({ error: 'Sin permisos para ver este historial' })

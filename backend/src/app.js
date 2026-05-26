@@ -15,7 +15,10 @@ ensureDir(UPLOAD_DIR)
 const app = express()
 
 // ─── Trust Proxy (para IP real detrás de load balancer/nginx) ─
-app.set('trust proxy', true)
+// 'true' permite falsificar X-Forwarded-For y bypassear el rate limit.
+// En prod (detrás de 1 proxy: nginx, ALB, Cloudflare) usar 1.
+// En dev (sin proxy) usar 'loopback'.
+app.set('trust proxy', config.isProd ? 1 : 'loopback')
 
 // ─── Security Headers (Helmet + CSP) ──────────────────────────
 app.use(helmet({
@@ -73,8 +76,9 @@ app.use(express.json({ limit: '2mb' }))
 app.use(express.urlencoded({ extended: true, limit: '2mb' }))
 
 // ─── CSRF Protection (double-submit cookie) ───────────────────
-const { generateToken, doubleCsrfProtection } = doubleCsrf({
+const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
   getSecret: () => config.jwt.secret,
+  getSessionIdentifier: (req) => req.cookies?.__access_token || req.ip || 'anon',
   cookieName: '__csrf',
   cookieOptions: {
     httpOnly: true,
@@ -82,12 +86,12 @@ const { generateToken, doubleCsrfProtection } = doubleCsrf({
     secure: config.isProd,
     path: '/',
   },
-  getTokenFromRequest: (req) => req.headers['x-csrf-token'],
+  getCsrfTokenFromRequest: (req) => req.headers['x-csrf-token'],
 })
 
 // Endpoint para obtener CSRF token
 app.get('/api/csrf-token', (req, res) => {
-  const token = generateToken(req, res)
+  const token = generateCsrfToken(req, res)
   res.json({ csrfToken: token })
 })
 

@@ -58,8 +58,12 @@ async function bootstrap(){
     await sequelize.authenticate()
     console.log('✅ DB conectada')
 
-    try { await transporter.verify(); console.log('📧 SMTP verificado y listo') }
-    catch(e){ console.warn('⚠️ SMTP no verificó:', e.message) }
+    try {
+      await Promise.race([
+        transporter.verify().then(() => console.log('📧 SMTP verificado y listo')),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP verify timeout (3s)')), 3000))
+      ])
+    } catch(e){ console.warn('⚠️ SMTP no verificó:', e.message) }
 
     if (config.syncDb) {
       await sequelize.sync({ alter: true })

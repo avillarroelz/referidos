@@ -7,8 +7,8 @@ const ctrl = require('../controllers/referidos.controller')
 // Todas requieren login
 router.use(authRequired)
 
-// Crear (TRABAJADOR, RRHH, JefeRRHH o ADMIN — ADC no crea referidos)
-router.post('/', requireRoles('TRABAJADOR', 'RRHH', 'JefeRRHH', 'ADMIN'), ctrl.createValidators, ctrl.create)
+// Crear — cualquier usuario autenticado puede agregar un referido
+router.post('/', ctrl.createValidators, ctrl.create)
 
 // Listar (cualquier autenticado) – el controller aplica permisos
 router.get('/', ctrl.listValidators, ctrl.list)

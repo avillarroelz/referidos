@@ -328,19 +328,24 @@ async function forgotPassword(req, res) {
       const frontendUrl = getFrontendUrl(req)
       const resetUrl = `${frontendUrl}/reset-password?token=${token}`
 
-      await sendMail({
-        to: correo,
-        subject: 'Restablecer contraseña — Tracker',
-        html: `
-          <h2>Restablecer contraseña</h2>
-          <p>Haz clic en el siguiente enlace para cambiar tu contraseña:</p>
-          <p><a href="${resetUrl}">${resetUrl}</a></p>
-          <p>Este enlace expira en 1 hora.</p>
-          <p>Si no solicitaste esto, ignora este correo.</p>
-        `,
-      })
-
-      logSecurityEvent('password_reset_requested', { correo, ip: req.ip })
+      try {
+        await sendMail({
+          to: correo,
+          subject: 'Restablecer contraseña — Tracker',
+          html: `
+            <h2>Restablecer contraseña</h2>
+            <p>Haz clic en el siguiente enlace para cambiar tu contraseña:</p>
+            <p><a href="${resetUrl}">${resetUrl}</a></p>
+            <p>Este enlace expira en 1 hora.</p>
+            <p>Si no solicitaste esto, ignora este correo.</p>
+          `,
+        })
+        logSecurityEvent('password_reset_requested', { correo, ip: req.ip })
+      } catch (mailErr) {
+        // No revelar al cliente que el envío falló — solo loguear
+        logger.error('[auth] sendMail falló en forgotPassword:', mailErr.message)
+        logSecurityEvent('password_reset_mail_failed', { correo, ip: req.ip })
+      }
     }
 
     // Respuesta genérica siempre
