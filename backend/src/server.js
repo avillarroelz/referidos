@@ -13,7 +13,7 @@ async function seedRolesAndAdmin() {
   const Rol = getModel('Rol')
 
   // 1) Crear roles base
-  const defaults = (process.env.ROLES_DEFAULT || 'TRABAJADOR,RRHH,ADMIN,ADC,JefeRRHH')
+  const defaults = (process.env.ROLES_DEFAULT || 'TRABAJADOR,RRHH,ADMIN,ADC,JefeRRHH,EXTERNO')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)

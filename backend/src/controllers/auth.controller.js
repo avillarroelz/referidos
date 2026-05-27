@@ -441,9 +441,14 @@ async function googleCallback(req, res) {
         await user.update({ google_id: googleUser.googleId, google_refresh_token: tokens.refresh_token, profile_picture: googleUser.picture, auth_provider: 'google', last_login: new Date() })
       } else {
         user = await Usuario.create({ username: googleUser.name, correo: googleUser.email, google_id: googleUser.googleId, google_refresh_token: tokens.refresh_token, profile_picture: googleUser.picture, auth_provider: 'google', estado: true, last_login: new Date() })
+        // Rol por dominio: @ecora.cl → TRABAJADOR (interno); cualquier otro → EXTERNO
+        const dominio = String(googleUser.email || '').split('@')[1]?.toLowerCase() || ''
+        const esInterno = dominio === config.auth.internalEmailDomain
+        const rolNombre = esInterno ? 'TRABAJADOR' : 'EXTERNO'
         const Rol = getModel('Rol')
-        const trabajadorRole = await Rol.findOne({ where: { nombre: 'TRABAJADOR' } })
-        if (trabajadorRole) await user.addRole(trabajadorRole)
+        const rol = await Rol.findOne({ where: { nombre: rolNombre } })
+        if (rol) await user.addRole(rol)
+        logger.info(`[auth] Usuario Google creado: ${googleUser.email} → rol ${rolNombre}`)
         await user.reload({ include: [{ association: 'roles' }, { association: 'unidadNegocios', attributes: ['id', 'nombre'] }] })
       }
     } else {

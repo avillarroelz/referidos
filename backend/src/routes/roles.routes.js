@@ -9,6 +9,11 @@ router.get('/usuarios', authRequired, requireRoles('ADMIN','RRHH'), ctrl.listUsu
 router.post('/', authRequired, requireRoles('ADMIN'), ctrl.createValidators, ctrl.create)
 router.delete('/:id', authRequired, requireRoles('ADMIN'), ctrl.removeValidators, ctrl.remove)
 
+// gestión de usuarios (solo ADMIN)
+router.post('/usuarios', authRequired, requireRoles('ADMIN'), ctrl.createUsuarioValidators, ctrl.createUsuario)
+router.patch('/usuarios/:id', authRequired, requireRoles('ADMIN'), ctrl.updateUsuarioValidators, ctrl.updateUsuario)
+router.patch('/usuarios/:id/password', authRequired, requireRoles('ADMIN'), ctrl.resetUsuarioPasswordValidators, ctrl.resetUsuarioPassword)
+
 // asignación de roles a usuarios
 router.post('/asignar/:usuarioId', authRequired, requireRoles('ADMIN'), ctrl.assignValidators, ctrl.assignRole)
 router.post('/quitar/:usuarioId', authRequired, requireRoles('ADMIN'), ctrl.unassignValidators, ctrl.unassignRole)

@@ -46,6 +46,14 @@ module.exports = (sequelize, DataTypes) => {
         references: { model: 'usuarios', key: 'id' },
       },
 
+      // Usuario postulante (cuando un externo se postula a sí mismo estando logueado)
+      postulanteUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'postulante_user_id',
+        references: { model: 'usuarios', key: 'id' },
+      },
+
       // Unidad de negocio
       unidadNegocioId: {
         type: DataTypes.INTEGER,
@@ -106,6 +114,7 @@ module.exports = (sequelize, DataTypes) => {
       updatedAt: 'updated_at',
       indexes: [
         { fields: ['creado_por_usuario_id'] },
+        { fields: ['postulante_user_id'] },
         { fields: ['estado'] },
         { fields: ['enviado_adc'] },
         { fields: ['unidad_negocio_id'] },

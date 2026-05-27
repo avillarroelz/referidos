@@ -123,6 +123,18 @@ module.exports = function associate(models) {
       as: 'adcAsignado',
       foreignKey: 'asignadoADCUserId',
     })
+
+    // Usuario 1:N Referido (postulante externo)
+    Usuario.hasMany(Referido, {
+      as: 'misPostulaciones',
+      foreignKey: 'postulanteUserId',
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
+    })
+    Referido.belongsTo(Usuario, {
+      as: 'postulante',
+      foreignKey: 'postulanteUserId',
+    })
   }
 
   // Referido 1:N EstadoHistorial

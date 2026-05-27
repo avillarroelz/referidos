@@ -42,6 +42,11 @@ const config = {
   seedAdmin: process.env.SEED_ADMIN === 'true',
   adminEmail: process.env.ADMIN_EMAIL || 'admin@local',
   adminPass: process.env.ADMIN_PASS || 'admin123',
+
+  // Auth — dominio interno: correos de este dominio son TRABAJADOR; el resto, EXTERNO
+  auth: {
+    internalEmailDomain: (process.env.INTERNAL_EMAIL_DOMAIN || 'ecora.cl').toLowerCase().replace(/^@/, ''),
+  },
   
   // Rate Limiting
   rateLimit: {
