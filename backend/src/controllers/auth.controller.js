@@ -182,12 +182,18 @@ async function register(req, res) {
       estado: true
     })
 
-    const Rol = getModel('Rol')
-    const trabajadorRole = await Rol.findOne({ where: { nombre: 'TRABAJADOR' } })
-    if (trabajadorRole) await user.addRole(trabajadorRole)
+    // Asignar rol por dominio del correo (mismo criterio que login con Google):
+    // @ecora.cl -> TRABAJADOR, cualquier otro dominio -> EXTERNO.
+    const dominio = String(correo).split('@')[1]?.toLowerCase() || ''
+    const esInterno = dominio === config.auth.internalEmailDomain
+    const rolNombre = esInterno ? 'TRABAJADOR' : 'EXTERNO'
 
-    logger.info(`[auth] Registro exitoso: ${correo}`)
-    res.status(201).json({ id: user.id, username: user.username, correo: user.correo, message: 'Usuario creado exitosamente.' })
+    const Rol = getModel('Rol')
+    const rol = await Rol.findOne({ where: { nombre: rolNombre } })
+    if (rol) await user.addRole(rol)
+
+    logger.info(`[auth] Registro exitoso: ${correo} -> rol ${rolNombre}`)
+    res.status(201).json({ id: user.id, username: user.username, correo: user.correo, rol: rolNombre, message: 'Usuario creado exitosamente.' })
   } catch (error) {
     logger.error('[auth] Error en register:', error)
     res.status(500).json({ error: 'Error interno del servidor' })
