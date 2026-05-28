@@ -9,7 +9,9 @@ module.exports = (sequelize, DataTypes) => {
 
       // Datos del referido (persona referenciada)
       nombre: { type: DataTypes.STRING(180), allowNull: false },
-      rut: { type: DataTypes.STRING(20), allowNull: true, unique: true },
+      // RUT NO es único: la misma persona puede postular a varios cargos
+      // (o ser referida y luego auto-postular). Las búsquedas por RUT usan un índice no único.
+      rut: { type: DataTypes.STRING(20), allowNull: true },
       telefono: { type: DataTypes.STRING(30), allowNull: true },
       email: { type: DataTypes.STRING(180), allowNull: true, validate: { isEmail: true } },
       cargoPostulado: { type: DataTypes.STRING(180), allowNull: true, field: 'cargo_postulado' },
@@ -115,6 +117,7 @@ module.exports = (sequelize, DataTypes) => {
       indexes: [
         { fields: ['creado_por_usuario_id'] },
         { fields: ['postulante_user_id'] },
+        { fields: ['rut'] },
         { fields: ['estado'] },
         { fields: ['enviado_adc'] },
         { fields: ['unidad_negocio_id'] },

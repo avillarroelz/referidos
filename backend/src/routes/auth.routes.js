@@ -10,6 +10,7 @@ const {
   forgotPassword, forgotPasswordValidators,
   resetPassword, resetPasswordValidators,
   googleLogin, googleCallback,
+  updateMe, updateMeValidators,
 } = require('../controllers/auth.controller')
 
 // Rutas públicas (cada una con su rate limiter)
@@ -26,6 +27,7 @@ router.get('/google/callback', googleCallback)
 
 // Rutas protegidas
 router.get('/me', authRequired, me)
+router.patch('/me', authRequired, updateMeValidators, updateMe)
 router.post('/change-password', authRequired, changePasswordValidators, changePassword)
 
 module.exports = router

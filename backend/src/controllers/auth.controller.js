@@ -258,6 +258,46 @@ async function me(req, res) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// UPDATE ME (usuario edita sus propios datos: nombre y correo)
+// ──────────────────────────────────────────────────────────────
+
+const updateMeValidators = [
+  body('username').optional().isString().trim().notEmpty().withMessage('El nombre no puede estar vacío').isLength({ max: 100 }),
+  body('correo').optional().isEmail().normalizeEmail().withMessage('Correo inválido'),
+]
+
+async function updateMe(req, res) {
+  const errors = validationResult(req)
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
+
+  try {
+    const user = await Usuario.findByPk(req.auth.id)
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+
+    const updates = {}
+    if (req.body.username !== undefined) updates.username = String(req.body.username).trim()
+    if (req.body.correo !== undefined) {
+      const nuevoCorreo = String(req.body.correo).trim().toLowerCase()
+      if (nuevoCorreo !== user.correo) {
+        const dup = await Usuario.findOne({ where: { correo: nuevoCorreo } })
+        if (dup) return res.status(409).json({ error: 'Ese correo ya está en uso' })
+      }
+      updates.correo = nuevoCorreo
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No hay cambios para guardar' })
+    }
+
+    await user.update(updates)
+    return res.json({ ok: true, id: user.id, username: user.username, correo: user.correo })
+  } catch (error) {
+    logger.error('[auth] Error en updateMe:', error)
+    return res.status(500).json({ error: 'No se pudo actualizar el perfil' })
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
 // CHANGE PASSWORD (autenticado)
 // ──────────────────────────────────────────────────────────────
 
@@ -480,4 +520,5 @@ module.exports = {
   forgotPassword, forgotPasswordValidators,
   resetPassword, resetPasswordValidators,
   googleLogin, googleCallback,
+  updateMe, updateMeValidators,
 }

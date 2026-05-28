@@ -1,15 +1,19 @@
 // backend/src/routes/postulaciones.routes.js
 const router = require('express').Router()
 const { authRequired } = require('../middleware/auth')
+const { uploader } = require('../middleware/upload')
 const ctrl = require('../controllers/postulaciones.controller')
 
-// Todas requieren login (cualquier usuario autenticado postula a su propia cuenta)
-router.use(authRequired)
-
-// Crear postulación ligada al usuario autenticado
-router.post('/', ctrl.crearValidators, ctrl.crear)
+// Crear postulación autenticada (queda ligada a postulanteUserId)
+// Campo del PDF: 'cv'
+router.post('/',
+  authRequired,
+  uploader('postulaciones').single('cv'),
+  ctrl.crearValidators,
+  ctrl.crear
+)
 
 // Listar las postulaciones del usuario autenticado
-router.get('/mias', ctrl.listarMias)
+router.get('/mias', authRequired, ctrl.listarMias)
 
 module.exports = router
