@@ -5,7 +5,10 @@
 services:
   backend:
     image: ${ECR_REGISTRY}/referidos-backend:${TAG:-latest}
-    env_file: .env
+    env_file: backend.env
+    # CA de RDS para validar TLS en NODE_ENV=production (DB_SSL_CA apunta aquí)
+    volumes:
+      - ./rds-ca.pem:/app/certs/rds-ca.pem:ro
     expose:
       - "8080"
     restart: unless-stopped
