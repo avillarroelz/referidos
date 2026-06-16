@@ -1,0 +1,35 @@
+# Despliegue de Referidos en EC2 (sa-east-1)
+# Imágenes desde ECR; Caddy resuelve TLS (Let's Encrypt) en el borde.
+# Variables esperadas en el entorno: ECR_REGISTRY (ej: 407024121863.dkr.ecr.sa-east-1.amazonaws.com)
+# y TAG (opcional, por defecto "latest"). Los secretos van en ./.env (no versionado).
+services:
+  backend:
+    image: ${ECR_REGISTRY}/referidos-backend:${TAG:-latest}
+    env_file: .env
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  frontend:
+    image: ${ECR_REGISTRY}/referidos-frontend:${TAG:-latest}
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

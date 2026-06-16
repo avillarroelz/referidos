@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+uploads
+tests
+coverage
+*.md
+.git
+.gitignore
+nodemon.json

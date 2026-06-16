@@ -4,7 +4,7 @@ const { loadModels } = require('../db/loadModels')
 const associate = require('../db/associate')
 const bcrypt = require('bcryptjs')
 
-const ROLES = ['ADMIN', 'RRHH', 'JefeRRHH', 'TRABAJADOR', 'ADC']
+const ROLES = ['ADMIN', 'RRHH', 'JefeRRHH', 'TRABAJADOR', 'ADC', 'EXTERNO']
 const PASSWORD = 'TestPassword123!'
 
 async function main() {

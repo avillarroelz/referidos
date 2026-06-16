@@ -377,7 +377,7 @@ async function forgotPassword(req, res) {
       try {
         await sendMail({
           to: correo,
-          subject: 'Restablecer contraseña — Tracker',
+          subject: 'Restablecer contraseña — Referidos',
           html: `
             <h2>Restablecer contraseña</h2>
             <p>Haz clic en el siguiente enlace para cambiar tu contraseña:</p>

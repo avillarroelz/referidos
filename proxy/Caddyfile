@@ -1,0 +1,15 @@
+# Proxy de borde: TLS automático (Let's Encrypt) + enrutado por ruta.
+# Caddy obtiene y renueva el certificado del dominio automáticamente.
+referidos.ecoraapp.com {
+	encode gzip
+
+	# API → backend Express
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	# Resto → frontend (Nginx con el SPA)
+	handle {
+		reverse_proxy frontend:80
+	}
+}
