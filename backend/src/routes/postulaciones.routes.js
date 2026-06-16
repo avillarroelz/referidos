@@ -5,10 +5,13 @@ const { uploader } = require('../middleware/upload')
 const ctrl = require('../controllers/postulaciones.controller')
 
 // Crear postulación autenticada (queda ligada a postulanteUserId)
-// Campo del PDF: 'cv'
+// Campos de archivo: 'cv' (PDF obligatorio) y 'documentos' (hasta 20 PDF opcionales)
 router.post('/',
   authRequired,
-  uploader('postulaciones').single('cv'),
+  uploader('postulaciones').fields([
+    { name: 'cv', maxCount: 1 },
+    { name: 'documentos', maxCount: 20 },
+  ]),
   ctrl.crearValidators,
   ctrl.crear
 )

@@ -35,19 +35,31 @@ const crearValidators = [
 // Crear postulación (con o sin sesión; el archivo PDF de CV es OBLIGATORIO)
 
 async function crear(req, res) {
+  // Con uploader.fields(), multer entrega los archivos en req.files (objeto por campo)
+  const cvFile = req.files?.cv?.[0] || null
+  const docFiles = req.files?.documentos || []
+
   const errors = validationResult(req)
   if (!errors.isEmpty()) {
-    cleanupTempFile(req.file)
+    cleanupTempFiles(req)
     return res.status(400).json({ errors: errors.array() })
   }
 
   // Archivo CV obligatorio (PDF)
-  if (!req.file) {
+  if (!cvFile) {
+    cleanupTempFiles(req)
     return res.status(400).json({ errors: [{ msg: 'Debes adjuntar tu CV en PDF', param: 'cv' }] })
   }
-  if (req.file.mimetype !== 'application/pdf') {
-    cleanupTempFile(req.file)
+  if (cvFile.mimetype !== 'application/pdf') {
+    cleanupTempFiles(req)
     return res.status(400).json({ errors: [{ msg: 'El CV debe ser un archivo PDF', param: 'cv' }] })
+  }
+
+  // Documentos adicionales: opcionales, pero solo se aceptan PDF
+  const docNoPdf = docFiles.find(f => f.mimetype !== 'application/pdf')
+  if (docNoPdf) {
+    cleanupTempFiles(req)
+    return res.status(400).json({ errors: [{ msg: 'Los documentos adicionales deben ser archivos PDF', param: 'documentos' }] })
   }
 
   const t = await sequelize.transaction()
@@ -76,7 +88,7 @@ async function crear(req, res) {
       }
       if (!creadorId) {
         await t.rollback()
-        cleanupTempFile(req.file)
+        cleanupTempFiles(req)
         return res.status(500).json({ error: 'No hay usuarios administrativos configurados' })
       }
     }
@@ -127,34 +139,12 @@ async function crear(req, res) {
       comentario: req.auth?.id ? 'Postulación creada por el postulante' : 'Postulación desde formulario público',
     }, { transaction: t })
 
-    // Subir CV como adjunto (S3 si está configurado; si falla, fallback local)
-    let rutaFinal = path.relative(process.cwd(), req.file.path).replace(/\\/g, '/')
-    let s3Key = null
-    if (useS3) {
-      try {
-        const fileContent = fs.readFileSync(req.file.path)
-        s3Key = s3Service.generateReferidoFileKey(req.body.rut || 'sin-rut', ref.id, req.file.originalname, 'cv')
-        await s3Service.uploadFile(fileContent, s3Key, req.file.mimetype, {
-          referidoId: String(ref.id),
-          originalName: req.file.originalname,
-          tipo: 'cv',
-        })
-        rutaFinal = s3Key
-        try { fs.unlinkSync(req.file.path) } catch {}
-        console.log(`✅ CV subido a S3: ${s3Key}`)
-      } catch (e) {
-        console.warn('⚠️ Falló S3, guardando localmente:', e.message)
-      }
+    // Subir CV (obligatorio) + documentos adicionales (opcionales) como adjuntos.
+    // S3 si está configurado; si falla, fallback local. Cada archivo => un Documento.
+    await guardarDocumento(cvFile, ref, req.body.rut, 'cv', t)
+    for (const doc of docFiles) {
+      await guardarDocumento(doc, ref, req.body.rut, 'documento', t)
     }
-
-    await Documento().create({
-      nombre: req.file.originalname,
-      ruta: rutaFinal,
-      s3Key,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      referidoId: ref.id,
-    }, { transaction: t })
 
     await t.commit()
 
@@ -169,7 +159,7 @@ async function crear(req, res) {
     })
   } catch (err) {
     await t.rollback()
-    cleanupTempFile(req.file)
+    cleanupTempFiles(req)
     console.error('[postulaciones] crear FAIL', err)
 
     if (err.name === 'SequelizeUniqueConstraintError') {
@@ -207,10 +197,49 @@ async function listarMias(req, res) {
   }
 }
 
-// Limpia el archivo temporal subido si el flujo falla antes de procesarlo
-function cleanupTempFile(file) {
-  if (!file?.path) return
-  try { fs.unlinkSync(file.path) } catch {}
+// Guarda un archivo como Documento ligado al referido.
+// Sube a S3 si está configurado; si falla, deja la ruta local como fallback.
+async function guardarDocumento(file, ref, rut, tipo, t) {
+  let rutaFinal = path.relative(process.cwd(), file.path).replace(/\\/g, '/')
+  let s3Key = null
+  if (useS3) {
+    try {
+      const fileContent = fs.readFileSync(file.path)
+      s3Key = s3Service.generateReferidoFileKey(rut || 'sin-rut', ref.id, file.originalname, tipo)
+      await s3Service.uploadFile(fileContent, s3Key, file.mimetype, {
+        referidoId: String(ref.id),
+        originalName: file.originalname,
+        tipo,
+      })
+      rutaFinal = s3Key
+      try { fs.unlinkSync(file.path) } catch {}
+      console.log(`✅ ${tipo} subido a S3: ${s3Key}`)
+    } catch (e) {
+      console.warn('⚠️ Falló S3, guardando localmente:', e.message)
+    }
+  }
+
+  await Documento().create({
+    nombre: file.originalname,
+    ruta: rutaFinal,
+    s3Key,
+    mimetype: file.mimetype,
+    size: file.size,
+    referidoId: ref.id,
+  }, { transaction: t })
+}
+
+// Limpia los archivos temporales subidos si el flujo falla antes de procesarlos.
+// Con uploader.fields() los archivos vienen en req.files (objeto de arrays por campo).
+function cleanupTempFiles(req) {
+  const grupos = req.files ? Object.values(req.files) : []
+  for (const grupo of grupos) {
+    for (const file of grupo) {
+      if (file?.path) {
+        try { fs.unlinkSync(file.path) } catch {}
+      }
+    }
+  }
 }
 
 module.exports = { crear, crearValidators, listarMias }
