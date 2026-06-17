@@ -122,7 +122,9 @@ class S3Service {
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_')
     // Limpiar el RUT (quitar puntos y guiones)
     const sanitizedRut = rut ? rut.replace(/[.-]/g, '') : 'sin-rut'
-    return `referidos/${sanitizedRut}/${referidoId}/${tipo}/${timestamp}_${sanitizedFileName}`
+    // Carpeta por tipo: el CV va en {rut}/cv/ y cualquier otro documento en {rut}/docs/
+    const carpeta = tipo === 'cv' ? 'cv' : 'docs'
+    return `${sanitizedRut}/${carpeta}/${timestamp}_${sanitizedFileName}`
   }
 
   /**

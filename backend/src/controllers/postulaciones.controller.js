@@ -4,6 +4,7 @@
 const fs = require('fs')
 const path = require('path')
 const { body, validationResult } = require('express-validator')
+const { Op } = require('sequelize')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS } = require('../lib/estados')
 const { notificarNuevoReferidoPublico } = require('../services/notificationService')
@@ -60,6 +61,30 @@ async function crear(req, res) {
   if (docNoPdf) {
     cleanupTempFiles(req)
     return res.status(400).json({ errors: [{ msg: 'Los documentos adicionales deben ser archivos PDF', param: 'documentos' }] })
+  }
+
+  // Bloquear doble postulación al MISMO cargo con el MISMO RUT (comparando el RUT
+  // sin puntos ni guión para tolerar distintos formatos de ingreso).
+  const rutNorm = String(req.body.rut || '').replace(/[.-]/g, '').trim()
+  const cargoNorm = req.body.cargoPostulado ? String(req.body.cargoPostulado).trim().toUpperCase() : null
+  if (rutNorm && cargoNorm) {
+    const yaExiste = await Referido().findOne({
+      where: {
+        cargoPostulado: cargoNorm,
+        [Op.and]: sequelize.where(
+          sequelize.fn('REPLACE', sequelize.fn('REPLACE', sequelize.col('rut'), '.', ''), '-', ''),
+          rutNorm
+        ),
+      },
+    })
+    if (yaExiste) {
+      cleanupTempFiles(req)
+      return res.status(409).json({
+        code: 'DUPLICATE_POSTULACION',
+        error: 'Ya tienes una postulación para este cargo. No puedes postular dos veces al mismo cargo, '
+          + 'pero sí puedes agregar más documentos o editarla desde "Mis Postulaciones".',
+      })
+    }
   }
 
   const t = await sequelize.transaction()

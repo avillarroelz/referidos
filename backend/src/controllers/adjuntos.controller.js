@@ -20,8 +20,10 @@ async function assertReferidoAccess(req, res, ref) {
   const roles = req.auth?.roles || []
   const isPrivileged = roles.some(r => ['RRHH', 'ADMIN', 'JefeRRHH'].includes(r))
   const isOwner = ref.creadoPorUserId === req.auth.id
+  // El postulante externo es dueño de su postulación (postulanteUserId)
+  const isPostulante = ref.postulanteUserId != null && ref.postulanteUserId === req.auth.id
   const isAssignedAdc = ref.asignadoADCUserId === req.auth.id
-  if (!isPrivileged && !isOwner && !isAssignedAdc) {
+  if (!isPrivileged && !isOwner && !isPostulante && !isAssignedAdc) {
     res.status(403).json({ error: 'Sin permisos para acceder a este referido' })
     return false
   }

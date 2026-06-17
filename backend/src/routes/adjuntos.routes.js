@@ -7,21 +7,21 @@ const ctrl = require('../controllers/adjuntos.controller')
 // Todas requieren login
 router.use(authRequired)
 
-// Listar
-router.get('/', requireRoles('TRABAJADOR','RRHH','ADMIN'), ctrl.idValidators, ctrl.list)
+// Listar (EXTERNO solo accede a los suyos por assertReferidoAccess)
+router.get('/', requireRoles('TRABAJADOR','RRHH','ADMIN','EXTERNO'), ctrl.idValidators, ctrl.list)
 
 // Subir múltiples (campo "files")
 router.post('/',
-  requireRoles('TRABAJADOR','RRHH','ADMIN'),
+  requireRoles('TRABAJADOR','RRHH','ADMIN','EXTERNO'),
   ctrl.idValidators,
   uploader(`referidos`).array('files', 10),
   ctrl.upload
 )
 
 // Descargar
-router.get('/:docId/download', requireRoles('TRABAJADOR','RRHH','ADMIN'), ctrl.delValidators, ctrl.download)
+router.get('/:docId/download', requireRoles('TRABAJADOR','RRHH','ADMIN','EXTERNO'), ctrl.delValidators, ctrl.download)
 
-// Eliminar
-router.delete('/:docId', requireRoles('RRHH','ADMIN'), ctrl.delValidators, ctrl.remove)
+// Eliminar (EXTERNO puede borrar los de su propia postulación)
+router.delete('/:docId', requireRoles('RRHH','ADMIN','EXTERNO'), ctrl.delValidators, ctrl.remove)
 
 module.exports = router
