@@ -12,4 +12,5 @@ module.exports = {
   EstadoHistorial: ['estado_historial', 'EstadoHistorial', 'historial'],
   Comentario: ['comentario', 'Comentario', 'comentarios'],
   Notificacion: ['notificacion', 'Notificacion', 'notificaciones'],
+  Feedback: ['feedback', 'Feedback', 'feedbacks'],
 }

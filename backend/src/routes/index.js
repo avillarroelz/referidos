@@ -15,6 +15,7 @@ router.use('/postulaciones', require('./postulaciones.routes'))
 router.use('/kpis', require('./kpis.routes'))
 router.use('/gmail', require('./gmail.routes'))
 router.use('/notificaciones', require('./notificaciones.routes'))
+router.use('/feedback', require('./feedback.routes'))
 router.use('/public', require('./public.routes'))
 router.use('/integracion', require('./integracion.routes'))
 

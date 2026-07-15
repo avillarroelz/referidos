@@ -23,6 +23,7 @@ module.exports = function associate(models) {
   const EstadoHistorial= pick('estado_historial', 'EstadoHistorial', 'historial')
   const Comentario     = pick('comentario', 'Comentario', 'comentarios')
   const Notificacion   = pick('notificacion', 'Notificacion', 'notificaciones')
+  const Feedback       = pick('feedback', 'Feedback', 'feedbacks')
 
   // ───────────────────────────────────────────────────────────────────────────────
   // Usuario ↔ Rol (N:M) a través de UsuarioRol
@@ -240,6 +241,20 @@ module.exports = function associate(models) {
     Notificacion.belongsTo(Referido, {
       as: 'referido',
       foreignKey: 'referidoId',
+    })
+  }
+
+  // Usuario 1:N Feedback (autor)
+  if (Usuario && Feedback) {
+    Usuario.hasMany(Feedback, {
+      as: 'feedbacks',
+      foreignKey: 'autorUserId',
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
+    })
+    Feedback.belongsTo(Usuario, {
+      as: 'autor',
+      foreignKey: 'autorUserId',
     })
   }
 }

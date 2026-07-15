@@ -128,6 +128,17 @@ class S3Service {
   }
 
   /**
+   * Generar key único para una imagen de feedback
+   * @param {number} feedbackId - ID del feedback
+   * @param {string} fileName - Nombre original del archivo
+   */
+  generateFeedbackFileKey(feedbackId, fileName) {
+    const timestamp = Date.now()
+    const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_')
+    return `feedback/${feedbackId}/${timestamp}_${sanitizedFileName}`
+  }
+
+  /**
    * Verificar si las credenciales están configuradas
    */
   isConfigured() {
