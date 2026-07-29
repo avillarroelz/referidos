@@ -9,3 +9,4 @@ coverage
 .git
 .gitignore
 nodemon.json
+gmail-config.json
