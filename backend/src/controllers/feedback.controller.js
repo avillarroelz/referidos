@@ -91,8 +91,8 @@ async function crear(req, res) {
 // Listar feedbacks (solo ADMIN). Filtro opcional por estado.
 
 async function listar(req, res) {
-  const page = Number(req.query.page) || 1
-  const limit = Number(req.query.limit) || 25
+  const page = Math.max(Number(req.query.page) || 1, 1)
+  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200)
   const offset = (page - 1) * limit
 
   const where = {}

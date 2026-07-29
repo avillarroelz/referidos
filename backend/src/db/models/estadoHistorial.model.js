@@ -16,7 +16,7 @@ module.exports = (sequelize, DataTypes) => {
 
       actorUserId: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true, // null = transición iniciada por sistema externo (integración)
         field: 'actor_user_id',
         references: { model: 'usuarios', key: 'id' },
       },

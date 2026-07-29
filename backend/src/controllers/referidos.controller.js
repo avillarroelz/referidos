@@ -1068,8 +1068,8 @@ async function listarParaADC(req, res) {
     return res.status(403).json({ error: 'Solo usuarios ADC' })
   }
 
-  const page = Number(req.query.page) || 1
-  const limit = Number(req.query.limit) || 25
+  const page = Math.max(Number(req.query.page) || 1, 1)
+  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200)
   const offset = (page - 1) * limit
 
   try {

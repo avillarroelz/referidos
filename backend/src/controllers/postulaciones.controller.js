@@ -202,8 +202,8 @@ async function crear(req, res) {
 async function listarMias(req, res) {
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  const page = Number(req.query.page) || 1
-  const limit = Number(req.query.limit) || 25
+  const page = Math.max(Number(req.query.page) || 1, 1)
+  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200)
   const offset = (page - 1) * limit
 
   try {

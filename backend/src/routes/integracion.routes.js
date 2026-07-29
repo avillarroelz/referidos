@@ -68,10 +68,10 @@ router.patch('/:id/resultado-reclutamiento', requireApiKey, validators, async (r
 
     await EstadoHistorial.create({
       referidoId: id,
-      estadoAnterior,
-      estadoNuevo: resultado,
+      desde: estadoAnterior,
+      hacia: resultado,
       comentario: comentario || `Resultado informado por sistema de reclutamiento: ${resultado}`,
-      cambiadoPorUserId: null,
+      actorUserId: null, // transición iniciada por sistema externo, sin usuario actor
     }, { transaction: t })
 
     await t.commit()

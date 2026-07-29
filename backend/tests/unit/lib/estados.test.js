@@ -10,14 +10,15 @@ const { ESTADOS, DICTAMEN_ADC, puedePasar } = require('../../../src/lib/estados'
 
 describe('Estados y Transiciones', () => {
   describe('ESTADOS', () => {
-    it('debe definir exactamente 8 estados', () => {
-      expect(Object.keys(ESTADOS)).toHaveLength(8)
+    it('debe definir exactamente 12 estados', () => {
+      expect(Object.keys(ESTADOS)).toHaveLength(12)
     })
 
     it('debe incluir todos los estados esperados', () => {
       const expected = [
-        'PENDIENTE', 'EN_REVISION', 'ENVIADO_ADC', 'VALIDADO_ADC',
-        'RECHAZADO_ADC', 'CONTACTADO', 'APROBADO', 'RECHAZADO'
+        'PENDIENTE', 'EN_REVISION', 'APROBADO_JEFE', 'LISTA_ESPERA',
+        'ENVIADO_ADC', 'VALIDADO_ADC', 'RECHAZADO_ADC', 'CONTACTADO',
+        'APROBADO', 'RECHAZADO', 'CONTRATADO', 'NO_CONTRATADO',
       ]
       expected.forEach(estado => {
         expect(ESTADOS[estado]).toBe(estado)
@@ -41,9 +42,12 @@ describe('Estados y Transiciones', () => {
     const transicionesValidas = [
       ['PENDIENTE', 'EN_REVISION'],
       ['PENDIENTE', 'RECHAZADO'],
-      ['EN_REVISION', 'ENVIADO_ADC'],
-      ['EN_REVISION', 'CONTACTADO'],
+      ['EN_REVISION', 'APROBADO_JEFE'],
       ['EN_REVISION', 'RECHAZADO'],
+      ['EN_REVISION', 'LISTA_ESPERA'],
+      ['APROBADO_JEFE', 'ENVIADO_ADC'],
+      ['APROBADO_JEFE', 'CONTACTADO'],
+      ['LISTA_ESPERA', 'APROBADO_JEFE'],
       ['ENVIADO_ADC', 'VALIDADO_ADC'],
       ['ENVIADO_ADC', 'RECHAZADO_ADC'],
       ['VALIDADO_ADC', 'CONTACTADO'],
@@ -51,6 +55,8 @@ describe('Estados y Transiciones', () => {
       ['RECHAZADO_ADC', 'EN_REVISION'],
       ['CONTACTADO', 'APROBADO'],
       ['CONTACTADO', 'RECHAZADO'],
+      ['APROBADO', 'CONTRATADO'],
+      ['APROBADO', 'NO_CONTRATADO'],
     ]
 
     transicionesValidas.forEach(([desde, hacia]) => {
@@ -64,14 +70,18 @@ describe('Estados y Transiciones', () => {
     const transicionesInvalidas = [
       ['PENDIENTE', 'APROBADO'],
       ['PENDIENTE', 'ENVIADO_ADC'],
+      ['EN_REVISION', 'ENVIADO_ADC'],   // debe pasar por APROBADO_JEFE
       ['EN_REVISION', 'APROBADO'],
       ['EN_REVISION', 'VALIDADO_ADC'],
+      ['APROBADO_JEFE', 'APROBADO'],
+      ['LISTA_ESPERA', 'ENVIADO_ADC'],
       ['ENVIADO_ADC', 'PENDIENTE'],
       ['ENVIADO_ADC', 'APROBADO'],
       ['VALIDADO_ADC', 'RECHAZADO'],
       ['VALIDADO_ADC', 'PENDIENTE'],
       ['RECHAZADO_ADC', 'APROBADO'],
       ['CONTACTADO', 'PENDIENTE'],
+      ['APROBADO', 'RECHAZADO'],
     ]
 
     transicionesInvalidas.forEach(([desde, hacia]) => {
@@ -82,15 +92,13 @@ describe('Estados y Transiciones', () => {
   })
 
   describe('estados terminales', () => {
-    it('APROBADO no debe permitir ninguna transición', () => {
-      Object.values(ESTADOS).forEach(estado => {
-        expect(puedePasar('APROBADO', estado)).toBe(false)
-      })
-    })
+    const terminales = ['RECHAZADO', 'CONTRATADO', 'NO_CONTRATADO']
 
-    it('RECHAZADO no debe permitir ninguna transición', () => {
-      Object.values(ESTADOS).forEach(estado => {
-        expect(puedePasar('RECHAZADO', estado)).toBe(false)
+    terminales.forEach(terminal => {
+      it(`${terminal} no debe permitir ninguna transición`, () => {
+        Object.values(ESTADOS).forEach(estado => {
+          expect(puedePasar(terminal, estado)).toBe(false)
+        })
       })
     })
   })

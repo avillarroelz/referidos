@@ -45,8 +45,9 @@ function getFrontendUrl(req) {
   for (const origin of allowedOrigins) {
     if (referer.startsWith(origin)) return origin
   }
+  // Solo en desarrollo: acceso por IP de LAN, el front corre en el 5173 del mismo host
   const host = req.headers.host
-  if (host && !host.includes('localhost')) {
+  if (!config.isProd && host && !host.includes('localhost')) {
     return `http://${host.split(':')[0]}:5173`
   }
   return allowedOrigins[0]

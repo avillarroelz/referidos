@@ -39,9 +39,9 @@ const ALLOWED = {
   NO_CONTRATADO:  [],
 };
 
-// Si quieres debug laxo: permite todas las transiciones conocidas.
-// Pon DEBUG_TRANSITIONS=false en prod para aplicar reglas ALLOWED.
-const DEBUG_TRANSITIONS = process.env.DEBUG_TRANSITIONS !== 'false';
+// Modo laxo SOLO para debug: permite cualquier transición entre estados conocidos.
+// Requiere opt-in explícito con DEBUG_TRANSITIONS=true; por defecto rigen las reglas ALLOWED.
+const DEBUG_TRANSITIONS = process.env.DEBUG_TRANSITIONS === 'true';
 
 function puedePasar(desde, hacia) {
   if (DEBUG_TRANSITIONS) {

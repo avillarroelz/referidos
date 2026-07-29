@@ -14,6 +14,8 @@ process.env.DB_LOG = 'false';
 jest.mock('../src/config', () => ({
   config: {
     port: 4000,
+    nodeEnv: 'test',
+    isProd: false,
     corsOrigin: '*',
     db: {
       host: 'localhost',
@@ -30,6 +32,10 @@ jest.mock('../src/config', () => ({
       expiresIn: '1h',
       refreshSecret: 'test-refresh-secret',
       refreshExpiresIn: '7d',
+      algorithm: 'HS256',
+    },
+    auth: {
+      internalEmailDomain: 'ecora.cl',
     },
     syncDb: false,
     seedAdmin: false,
@@ -49,6 +55,14 @@ jest.mock('../src/config', () => ({
       apiKey: 'test-anthropic-key',
     },
   },
+}));
+
+// ── Mock de CSRF (los tests de integración no manejan el double-submit cookie) ──
+jest.mock('csrf-csrf', () => ({
+  doubleCsrf: () => ({
+    generateCsrfToken: () => 'test-csrf-token',
+    doubleCsrfProtection: (req, res, next) => next(),
+  }),
 }));
 
 // ── Mock de rate limiters ──

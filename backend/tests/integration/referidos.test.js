@@ -48,12 +48,12 @@ describe('Referidos CRUD API', () => {
 
       expect(res.status).toBe(201)
       expect(res.body.id).toBeDefined()
-      expect(res.body.nombre).toBe('Juan Perez')
+      expect(res.body.nombre).toBe('JUAN PEREZ') // la API normaliza nombres a mayúsculas
       expect(res.body.email).toBe('juan@test.com')
       expect(res.body.telefono).toBe('+56912345678')
       expect(res.body.rut).toBe('12345678-9')
-      expect(res.body.cargoPostulado).toBe('Analista')
-      expect(res.body.observaciones).toBe('Buen candidato')
+      expect(res.body.cargoPostulado).toBe('ANALISTA') // también se normaliza a mayúsculas
+      expect(res.body.observaciones).toBe('BUEN CANDIDATO')
       expect(res.body.estado).toBe('PENDIENTE')
       expect(res.body.creadoPorUserId).toBe(user.id)
     })
@@ -219,9 +219,9 @@ describe('Referidos CRUD API', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.total).toBe(4)
-      expect(res.body.pendientes).toBe(2)
-      expect(res.body.aprobados).toBe(1)
-      expect(res.body.enProceso).toBe(1)
+      expect(res.body.pendientes).toBe(3) // PENDIENTE + EN_REVISION
+      expect(res.body.aprobados).toBe(0)  // aprobados = APROBADO_JEFE
+      expect(res.body.enProceso).toBe(1)  // APROBADO cuenta como en proceso
       expect(res.body.byEstado).toBeDefined()
       expect(res.body.byEstado.PENDIENTE).toBe(2)
       expect(res.body.byEstado.APROBADO).toBe(1)
@@ -254,7 +254,7 @@ describe('Referidos CRUD API', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.id).toBe(refId)
-      expect(res.body.nombre).toBe('Detalle Test')
+      expect(res.body.nombre).toBe('DETALLE TEST') // la API normaliza nombres a mayúsculas
       expect(res.body.creadoPor).toBeDefined()
       expect(res.body.creadoPor.id).toBe(user.id)
       expect(res.body.historial).toBeDefined()

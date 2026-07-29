@@ -61,11 +61,21 @@ describe('Auth Middleware', () => {
       expect(req.auth.roles).toEqual(['TRABAJADOR'])
     })
 
-    it('debe aceptar token por query string', () => {
+    it('debe rechazar token por query string (quedaría expuesto en logs)', () => {
       const token = generateAccessToken(userPayload)
       const { req, res, next } = mockReqResNext({
         header: jest.fn(() => null),
         query: { token },
+      })
+      authRequired(req, res, next)
+      expect(res.status).toHaveBeenCalledWith(401)
+      expect(next).not.toHaveBeenCalled()
+    })
+
+    it('debe aceptar token desde la cookie httpOnly', () => {
+      const token = generateAccessToken(userPayload)
+      const { req, res, next } = mockReqResNext({
+        cookies: { __access_token: token },
       })
       authRequired(req, res, next)
       expect(next).toHaveBeenCalled()
@@ -98,13 +108,7 @@ describe('Auth Middleware', () => {
       req.auth = { id: 1, roles: ['TRABAJADOR'] }
       await middleware(req, res, next)
       expect(res.status).toHaveBeenCalledWith(403)
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          error: 'Sin permisos suficientes',
-          required: ['ADMIN'],
-          current: ['TRABAJADOR'],
-        })
-      )
+      expect(res.json).toHaveBeenCalledWith({ error: 'Sin permisos suficientes' })
     })
 
     it('debe permitir acceso si tiene el rol requerido', async () => {
@@ -144,6 +148,17 @@ describe('Auth Middleware', () => {
       const token = generateAccessToken(userPayload)
       const { req, res, next } = mockReqResNext({
         header: jest.fn(() => `Bearer ${token}`),
+      })
+      authOptional(req, res, next)
+      expect(next).toHaveBeenCalled()
+      expect(req.auth).toBeDefined()
+      expect(req.auth.id).toBe(1)
+    })
+
+    it('debe adjuntar auth si hay cookie de sesión válida', () => {
+      const token = generateAccessToken(userPayload)
+      const { req, res, next } = mockReqResNext({
+        cookies: { __access_token: token },
       })
       authOptional(req, res, next)
       expect(next).toHaveBeenCalled()
