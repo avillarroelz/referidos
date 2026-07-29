@@ -463,9 +463,9 @@ async function syncFromGmail(req, res) {
   console.log(`[req:${req.id || '-'}] [syncFromGmail] userId=${req.auth.id} body=`, req.body)
 
   try {
-    // Usar token centralizado (de config o .env)
+    // Usar token centralizado (Secrets Manager, archivo local o .env)
     const { getSyncRefreshToken } = require('./gmailController')
-    const syncRefreshToken = getSyncRefreshToken()
+    const syncRefreshToken = await getSyncRefreshToken()
 
     if (!syncRefreshToken) {
       console.log(`[req:${req.id || '-'}] [syncFromGmail] Gmail no configurado`)
@@ -606,7 +606,7 @@ async function previewGmail(req, res) {
 
   try {
     const { getSyncRefreshToken } = require('./gmailController')
-    const syncRefreshToken = getSyncRefreshToken()
+    const syncRefreshToken = await getSyncRefreshToken()
 
     if (!syncRefreshToken) {
       send('error', { error: 'Gmail no configurado. Un administrador debe conectar el correo de sincronizacion.', requiresSetup: true })
@@ -700,7 +700,7 @@ async function syncFromGmailManual(req, res) {
 
   // Inicializar Gmail para descargar adjuntos
   const { getSyncRefreshToken } = require('./gmailController')
-  const syncRefreshToken = getSyncRefreshToken()
+  const syncRefreshToken = await getSyncRefreshToken()
   if (syncRefreshToken) {
     await gmailService.initialize({
       client_id: process.env.GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,

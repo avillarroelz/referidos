@@ -1,48 +1,11 @@
 // backend/src/controllers/gmailController.js
 const gmailService = require('../services/gmailService')
-const fs = require('fs')
-const path = require('path')
+// Token centralizado de la casilla de sincronización: Secrets Manager en
+// producción, archivo local en desarrollo (ver services/gmailTokenStore.js)
+const tokenStore = require('../services/gmailTokenStore')
 
-// Archivo para guardar config de Gmail (token centralizado)
-const GMAIL_CONFIG_PATH = path.join(__dirname, '../../gmail-config.json')
-
-/**
- * Leer configuracion de Gmail
- */
-function readGmailConfig() {
-  try {
-    if (fs.existsSync(GMAIL_CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(GMAIL_CONFIG_PATH, 'utf8'))
-    }
-  } catch (e) {
-    console.error('[gmail] Error leyendo config:', e)
-  }
-  return {}
-}
-
-/**
- * Guardar configuracion de Gmail
- */
-function saveGmailConfig(config) {
-  try {
-    fs.writeFileSync(GMAIL_CONFIG_PATH, JSON.stringify(config, null, 2))
-    return true
-  } catch (e) {
-    console.error('[gmail] Error guardando config:', e)
-    return false
-  }
-}
-
-/**
- * Obtener el refresh token (primero de config, luego de .env)
- */
-function getSyncRefreshToken() {
-  const config = readGmailConfig()
-  return config.refresh_token || process.env.GMAIL_SYNC_REFRESH_TOKEN
-}
-
-// Exportar para usar en otros controladores
-module.exports.getSyncRefreshToken = getSyncRefreshToken
+// Exportar para usar en otros controladores (async)
+module.exports.getSyncRefreshToken = tokenStore.getSyncRefreshToken
 
 /**
  * Procesar correos de Gmail y crear referidos
@@ -284,10 +247,12 @@ exports.gmailOAuthCallback = async (req, res) => {
       configured_at: new Date().toISOString()
     }
 
-    if (saveGmailConfig(config)) {
-      console.log(`[gmail] Token centralizado guardado para ${profile.emailAddress} por admin ${adminId}`)
+    try {
+      await tokenStore.saveConfig(config)
+      console.log(`[gmail] Token centralizado guardado (${tokenStore.storage}) para ${profile.emailAddress} por admin ${adminId}`)
       res.redirect(`${frontendUrl}/referidos?gmail_connected=true&email=${encodeURIComponent(profile.emailAddress)}`)
-    } else {
+    } catch (e) {
+      console.error('[gmail] Error guardando token:', e.name || e.message)
       res.redirect(`${frontendUrl}/referidos?gmail_error=save_failed`)
     }
 
@@ -304,7 +269,7 @@ exports.gmailOAuthCallback = async (req, res) => {
  */
 exports.getGmailStatus = async (req, res) => {
   try {
-    const config = readGmailConfig()
+    const config = await tokenStore.readConfig()
     const hasEnvToken = !!process.env.GMAIL_SYNC_REFRESH_TOKEN
     const hasConfigToken = !!config.refresh_token
 
@@ -312,7 +277,7 @@ exports.getGmailStatus = async (req, res) => {
       configured: hasConfigToken || hasEnvToken,
       email: config.email || process.env.GMAIL_SYNC_EMAIL || null,
       configuredAt: config.configured_at || null,
-      source: hasConfigToken ? 'config' : (hasEnvToken ? 'env' : null)
+      source: hasConfigToken ? tokenStore.storage : (hasEnvToken ? 'env' : null)
     })
   } catch (error) {
     res.status(500).json({ error: 'Error obteniendo estado de Gmail' })
