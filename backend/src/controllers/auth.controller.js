@@ -112,6 +112,14 @@ async function login(req, res) {
       return res.status(403).json({ error: 'Usuario deshabilitado' })
     }
 
+    // Cuenta creada con Google: no hay contraseña local que comparar. Se
+    // responde el MISMO 401 generico que un correo inexistente o una clave
+    // equivocada, para no revelar que la cuenta existe ni como se autentica.
+    if (!user.password) {
+      logSecurityEvent('failed_login', { reason: 'oauth_account', correo, ip: req.ip, ua: req.headers['user-agent'] })
+      return res.status(401).json({ error: 'Credenciales inválidas' })
+    }
+
     const passwordOk = await compare(password, user.password)
     if (!passwordOk) {
       // Incrementar intentos fallidos

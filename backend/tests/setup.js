@@ -66,14 +66,28 @@ jest.mock('csrf-csrf', () => ({
 }));
 
 // ── Mock de rate limiters ──
-jest.mock('../src/middleware/rateLimiters', () => ({
-  globalLimiter: (req, res, next) => next(),
-  authLoginLimiter: (req, res, next) => next(),
-  authRegisterLimiter: (req, res, next) => next(),
-  authRefreshLimiter: (req, res, next) => next(),
-  heavyOpsLimiter: (req, res, next) => next(),
-  publicFormLimiter: (req, res, next) => next(),
-}));
+// Se responde a CUALQUIER nombre de limitador con un passthrough. Enumerarlos a
+// mano hacía que agregar uno nuevo en src/middleware/rateLimiters.js rompiera
+// toda la suite de integración con un error que no lo menciona:
+// "Route.post() requires a callback function but got a [object Undefined]".
+jest.mock('../src/middleware/rateLimiters', () => {
+  const passthrough = (req, res, next) => next();
+  const noSonLimitadores = new Set(['__esModule', 'then', 'default', 'nodeType', 'toJSON']);
+  return new Proxy(
+    {},
+    {
+      get(target, prop) {
+        if (typeof prop !== 'string' || noSonLimitadores.has(prop)) {
+          return Reflect.get(target, prop);
+        }
+        return passthrough;
+      },
+      has(target, prop) {
+        return typeof prop === 'string' && !noSonLimitadores.has(prop);
+      },
+    }
+  );
+});
 
 // ── Mock de servicios externos ──
 jest.mock('../src/services/googleAuthService', () => ({

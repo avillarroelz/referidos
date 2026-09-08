@@ -48,7 +48,9 @@ const authLoginLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     const email = req.body?.correo?.toLowerCase()?.trim()
-    return email ? `login:${email}` : `login:ip:${ipKeyGenerator(req)}`
+    // ipKeyGenerator recibe la IP en texto: pasarle el `req` colapsa todas las
+    // peticiones a una unica clave compartida entre IPs distintas.
+    return email ? `login:${email}` : `login:ip:${ipKeyGenerator(req.ip)}`
   },
   handler: (_req, res) => {
     const retryAfter = res.getHeader('Retry-After') || 900
@@ -59,6 +61,32 @@ const authLoginLimiter = rateLimit({
       code: 'TOO_MANY_REQUESTS',
       retryAfterSeconds: Number(retryAfter),
       unlockTime: resetTime ? new Date(Number(resetTime) * 1000).toISOString() : null,
+    })
+  },
+})
+
+// ──────────────────────────────────────────────────────────────
+// Capa 2a-bis — Login: techo por IP, ADEMAS del de correo
+// El de correo frena la fuerza bruta contra UNA cuenta, pero deja pasar el
+// password spraying: una misma IP probando una clave comun contra miles de
+// correos nunca agota un contador por correo, y globalLimiter exime /auth/.
+// El limite es holgado a proposito (una oficina tras NAT comparte IP) y los
+// aciertos no gastan cuota, asi que solo lo alcanza quien acumula fallos.
+// ──────────────────────────────────────────────────────────────
+const authLoginIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `login:ip:${ipKeyGenerator(req.ip)}`,
+  handler: (_req, res) => {
+    const retryAfter = res.getHeader('Retry-After') || 900
+    res.status(429).json({
+      error: 'Demasiados intentos de login fallidos desde esta red.',
+      message: 'Se han acumulado demasiados intentos fallidos. Espera antes de volver a intentar.',
+      code: 'TOO_MANY_REQUESTS',
+      retryAfterSeconds: Number(retryAfter),
     })
   },
 })
@@ -98,7 +126,7 @@ const authRefreshLimiter = rateLimit({
 const heavyOpsLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  keyGenerator: (req) => (req.auth?.id ? `heavy:${req.auth.id}` : ipKeyGenerator(req)),
+  keyGenerator: (req) => (req.auth?.id ? `heavy:${req.auth.id}` : ipKeyGenerator(req.ip)),
   message: {
     error: 'Demasiadas operaciones pesadas. Espera unos minutos.',
     code: 'TOO_MANY_REQUESTS',
@@ -124,6 +152,7 @@ const publicFormLimiter = rateLimit({
 module.exports = {
   globalLimiter,
   authLoginLimiter,
+  authLoginIpLimiter,
   authRegisterLimiter,
   authRefreshLimiter,
   heavyOpsLimiter,

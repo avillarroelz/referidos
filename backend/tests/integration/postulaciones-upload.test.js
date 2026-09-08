@@ -155,10 +155,10 @@ describe('Contrato de subida de POST /api/public/postulaciones', () => {
         filename: 'notas.txt', contentType: 'text/plain',
       })
 
-    // DEUDA: hoy responde 500 porque el error del fileFilter no lleva `status` y
-    // cae en el errorHandler generico. Deberia ser un 400. Se fija el valor
-    // actual a proposito: si el bump de multer lo cambia, hay que enterarse.
-    expect(res.status).toBe(500)
+    // El rechazo es de la ENTRADA del cliente, no un fallo del servidor.
+    expect(res.status).toBe(400)
+    // El mensaje es propio: no se filtra interioridad de la libreria.
+    expect(res.body.error).not.toContain('Multer')
 
     const referidos = await getModel('Referido').count()
     expect(referidos).toBe(0)
@@ -170,9 +170,10 @@ describe('Contrato de subida de POST /api/public/postulaciones', () => {
         filename: 'enorme.pdf', contentType: 'application/pdf',
       })
 
-    // DEUDA: mismo caso que el anterior, hoy es 500 "File too large" y deberia
-    // ser 413. Valor actual fijado para detectar cambios del bump.
-    expect(res.status).toBe(500)
+    expect(res.status).toBe(413)
+    expect(res.body.error).toContain('10MB')
+    // "File too large" es el texto interno de multer: no debe salir al cliente.
+    expect(res.body.error).not.toContain('File too large')
 
     const referidos = await getModel('Referido').count()
     expect(referidos).toBe(0)
