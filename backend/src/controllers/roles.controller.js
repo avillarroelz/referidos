@@ -1,5 +1,6 @@
 // backend/src/controllers/roles.controller.js
 const { body, param, validationResult } = require('express-validator')
+const { wrapHandlers } = require('../lib/asyncHandler')
 const { getModel } = require('../db')
 const { hash } = require('../utils/hash')
 
@@ -173,10 +174,12 @@ async function resetUsuarioPassword(req, res) {
   }
 }
 
-module.exports = {
+// wrapHandlers encadena el rechazo de cada handler async a next(): sin esto
+// un fallo de base deja la peticion colgada en vez de responder 500.
+module.exports = wrapHandlers({
   create, createValidators, list, listUsuarios, remove, removeValidators,
   assignRole, assignValidators, unassignRole, unassignValidators,
   createUsuario, createUsuarioValidators,
   updateUsuario, updateUsuarioValidators,
   resetUsuarioPassword, resetUsuarioPasswordValidators,
-}
+})

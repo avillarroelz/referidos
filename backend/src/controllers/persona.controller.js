@@ -1,5 +1,6 @@
 // backend/src/controllers/persona.controller.js
 const { body, param, validationResult } = require('express-validator')
+const { wrapHandlers } = require('../lib/asyncHandler')
 const { getModel } = require('../db')
 
 const Persona = getModel('Persona')
@@ -54,6 +55,8 @@ async function remove(req, res) {
   res.json({ ok: true })
 }
 
-module.exports = {
+// wrapHandlers encadena el rechazo de cada handler async a next(): sin esto
+// un fallo de base deja la peticion colgada en vez de responder 500.
+module.exports = wrapHandlers({
   create, createValidators, list, getById, getValidators, update, updateValidators, remove, removeValidators
-}
+})

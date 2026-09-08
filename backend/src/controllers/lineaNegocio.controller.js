@@ -1,5 +1,6 @@
 // backend/src/controllers/lineaNegocio.controller.js
 const { body, param, validationResult } = require('express-validator')
+const { wrapHandlers } = require('../lib/asyncHandler')
 const { getModel } = require('../db')
 
 const Linea = getModel('LineaNegocio')
@@ -41,4 +42,6 @@ async function remove(req, res) {
   res.json({ ok: true })
 }
 
-module.exports = { create, list, update, remove, upsertValidators, updateValidators, removeValidators }
+// wrapHandlers encadena el rechazo de cada handler async a next(): sin esto
+// un fallo de base deja la peticion colgada en vez de responder 500.
+module.exports = wrapHandlers({ create, list, update, remove, upsertValidators, updateValidators, removeValidators })

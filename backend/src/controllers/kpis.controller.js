@@ -1,5 +1,6 @@
 // backend/src/controllers/kpis.controller.js
 const { QueryTypes, Op } = require('sequelize')
+const { wrapHandlers } = require('../lib/asyncHandler')
 const { query, validationResult } = require('express-validator')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS } = require('../lib/estados')
@@ -288,8 +289,10 @@ async function sla(req, res) {
   })
 }
 
-module.exports = {
+// wrapHandlers encadena el rechazo de cada handler async a next(): sin esto
+// un fallo de base deja la peticion colgada en vez de responder 500.
+module.exports = wrapHandlers({
   overview, series, leadtime, funnel,
   conversionRate, topReferrers, byUnit, sla,
   rangeValidators
-}
+})
