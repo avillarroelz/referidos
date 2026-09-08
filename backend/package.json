@@ -31,7 +31,7 @@
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.11.0",
     "morgan": "^1.10.0",
-    "multer": "^2.0.2",
+    "multer": "^2.3.0",
     "nodemailer": "^8.0.5",
     "pdf-parse": "^1.1.1",
     "pg": "^8.16.3",
