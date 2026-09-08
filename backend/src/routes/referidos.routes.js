@@ -43,14 +43,14 @@ router.patch('/:id/asignar-adc', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), ctrl
 // Dictamen ADC (solo ADC)
 router.patch('/:id/dictamen', requireRoles('ADC'), ctrl.dictaminarValidators, ctrl.dictaminar)
 
-// Sincronizar referidos desde Gmail (solo RRHH o ADMIN)
-router.post('/sync/gmail', heavyOpsLimiter, ctrl.syncGmailValidators, ctrl.syncFromGmail)
+// Sincronizar referidos desde Gmail (RRHH, JefeRRHH o ADMIN)
+router.post('/sync/gmail', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), heavyOpsLimiter, ctrl.syncGmailValidators, ctrl.syncFromGmail)
 
-// Preview de correos de Gmail via SSE (solo RRHH o ADMIN)
-router.get('/sync/gmail/preview', heavyOpsLimiter, ctrl.previewGmailValidators, ctrl.previewGmail)
+// Preview de correos de Gmail via SSE (RRHH, JefeRRHH o ADMIN)
+router.get('/sync/gmail/preview', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), heavyOpsLimiter, ctrl.previewGmailValidators, ctrl.previewGmail)
 
-// Importar referidos editados manualmente desde Gmail (solo RRHH o ADMIN)
-router.post('/sync/gmail/manual', heavyOpsLimiter, ctrl.syncGmailManualValidators, ctrl.syncFromGmailManual)
+// Importar referidos editados manualmente desde Gmail (RRHH, JefeRRHH o ADMIN)
+router.post('/sync/gmail/manual', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), heavyOpsLimiter, ctrl.syncGmailManualValidators, ctrl.syncFromGmailManual)
 
 // Adjuntos (rutas anidadas)
 router.use('/:id/adjuntos', require('./adjuntos.routes'))

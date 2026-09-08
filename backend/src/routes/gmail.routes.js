@@ -33,20 +33,20 @@ router.get('/status', requireRoles('RRHH', 'ADMIN'), getGmailStatus)
  * Procesar correos de Gmail y crear referidos
  * Requiere rol: ADMIN o RRHH
  */
-router.post('/process', processGmailReferidos)
+router.post('/process', requireRoles('RRHH', 'ADMIN'), processGmailReferidos)
 
 /**
  * POST /api/gmail/preview
  * Vista previa de correos sin procesarlos
  * Requiere rol: ADMIN o RRHH
  */
-router.post('/preview', previewGmailReferidos)
+router.post('/preview', requireRoles('RRHH', 'ADMIN'), previewGmailReferidos)
 
 /**
  * GET /api/gmail/auth-url
  * Obtener URL de autorización OAuth2
  * Requiere rol: ADMIN o RRHH
  */
-router.get('/auth-url', getAuthUrl)
+router.get('/auth-url', requireRoles('RRHH', 'ADMIN'), getAuthUrl)
 
 module.exports = router
