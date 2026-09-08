@@ -1,14 +1,15 @@
 // backend/src/routes/referidos.routes.js
 const router = require('express').Router()
 const { authRequired, requireRoles } = require('../middleware/auth')
+const { requireInterno } = require('../lib/acceso')
 const { heavyOpsLimiter } = require('../middleware/rateLimiters')
 const ctrl = require('../controllers/referidos.controller')
 
 // Todas requieren login
 router.use(authRequired)
 
-// Crear — cualquier usuario autenticado puede agregar un referido
-router.post('/', ctrl.createValidators, ctrl.create)
+// Crear — cualquier rol interno agrega un referido; EXTERNO no (solo postula)
+router.post('/', requireInterno, ctrl.createValidators, ctrl.create)
 
 // Listar (cualquier autenticado) – el controller aplica permisos
 router.get('/', ctrl.listValidators, ctrl.list)

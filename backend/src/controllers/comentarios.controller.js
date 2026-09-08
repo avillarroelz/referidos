@@ -2,6 +2,7 @@
 const { body, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { notificarComentario } = require('../services/notificationService')
+const { assertReferidoAccess } = require('../lib/acceso')
 
 const Comentario = () => getModel('Comentario')
 const Referido = () => getModel('Referido')
@@ -10,9 +11,22 @@ const Usuario = () => getModel('Usuario')
 // ──────────────────────────────────────────────────────────────
 // Validadores
 
+// Roles que pueden figurar en visibleParaRoles. Sin esta lista el cliente elige
+// cualquier valor y puede dirigir un comentario a un rol inventado o inesperado.
+const ROLES_VISIBILIDAD = ['TRABAJADOR', 'RRHH', 'JefeRRHH', 'ADMIN', 'ADC', 'EXTERNO']
+
 const crearValidators = [
   body('mensaje').isString().notEmpty().withMessage('mensaje es obligatorio'),
-  body('visibleParaRoles').optional().isString(),
+  body('visibleParaRoles')
+    .optional()
+    .isString()
+    .custom((valor) => {
+      const roles = valor.split(',').map(r => r.trim()).filter(Boolean)
+      if (roles.length === 0) throw new Error('visibleParaRoles no puede ir vacío')
+      const invalidos = roles.filter(r => !ROLES_VISIBILIDAD.includes(r))
+      if (invalidos.length > 0) throw new Error(`Roles no válidos: ${invalidos.join(', ')}`)
+      return true
+    }),
 ]
 
 // ──────────────────────────────────────────────────────────────
@@ -25,6 +39,13 @@ async function listar(req, res) {
   const userRoles = req.auth.roles || []
 
   try {
+    // El filtro por visibleParaRoles es visibilidad por ROL, no control de
+    // acceso: sin esta guarda un ajeno lee los comentarios de cualquier
+    // expediente cuya lista incluya su rol.
+    const referido = await Referido().findByPk(referidoId)
+    if (!referido) return res.status(404).json({ error: 'Referido no encontrado' })
+    if (!assertReferidoAccess(req, res, referido)) return
+
     const comentarios = await Comentario().findAll({
       where: { referidoId },
       include: [
@@ -64,6 +85,7 @@ async function crear(req, res) {
     if (!referido) {
       return res.status(404).json({ error: 'Referido no encontrado' })
     }
+    if (!assertReferidoAccess(req, res, referido)) return
 
     const comentario = await Comentario().create({
       referidoId,

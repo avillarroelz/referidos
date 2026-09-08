@@ -5,6 +5,7 @@ const { param, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { UPLOAD_DIR } = require('../utils/files')
 const s3Service = require('../services/s3Service')
+const { assertReferidoAccess } = require('../lib/acceso')
 
 const Referido = getModel('Referido')
 const Documento = getModel('Documento')
@@ -14,21 +15,6 @@ const Usuario = getModel('Usuario')
 const useS3 = s3Service.isConfigured()
 
 const idValidators = [ param('id').isInt({ gt: 0 }) ]
-
-// Verificar que el usuario tiene acceso al referido (owner, ADC asignado, o rol privilegiado)
-async function assertReferidoAccess(req, res, ref) {
-  const roles = req.auth?.roles || []
-  const isPrivileged = roles.some(r => ['RRHH', 'ADMIN', 'JefeRRHH'].includes(r))
-  const isOwner = ref.creadoPorUserId === req.auth.id
-  // El postulante externo es dueño de su postulación (postulanteUserId)
-  const isPostulante = ref.postulanteUserId != null && ref.postulanteUserId === req.auth.id
-  const isAssignedAdc = ref.asignadoADCUserId === req.auth.id
-  if (!isPrivileged && !isOwner && !isPostulante && !isAssignedAdc) {
-    res.status(403).json({ error: 'Sin permisos para acceder a este referido' })
-    return false
-  }
-  return true
-}
 
 async function list(req, res) {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })

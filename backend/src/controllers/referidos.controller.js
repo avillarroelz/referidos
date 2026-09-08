@@ -3,6 +3,7 @@ const { Op } = require('sequelize')
 const { body, param, query, validationResult } = require('express-validator')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS, DICTAMEN_ADC, puedePasar } = require('../lib/estados')
+const { puedeAccederReferido } = require('../lib/acceso')
 const gmailService = require('../services/gmailService')
 const s3Service = require('../services/s3Service')
 const { config } = require('../config')
@@ -140,7 +141,6 @@ async function create(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
-  console.log(`[req:${req.id || '-'}] [create] body=`, req.body)
 
   const t = await sequelize.transaction()
   try {
@@ -155,7 +155,6 @@ async function create(req, res) {
       estado: ESTADOS.PENDIENTE,
       creadoPorUserId: req.auth.id,
     }
-    console.log(`[req:${req.id || '-'}] [create] payload=`, payload)
 
     const ref = await Referido.create(payload, { transaction: t })
 
@@ -203,8 +202,6 @@ async function list(req, res) {
   const offset = (page - 1) * limit
   const where = {}
 
-  console.log(`[req:${req.id || '-'}] [list] query=`, req.query)
-  console.log(`[req:${req.id || '-'}] [list] auth=`, req.auth)
 
   if (estado) where.estado = estado
 
@@ -236,8 +233,7 @@ async function list(req, res) {
   }
 
   const { roles, hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
-  console.log(`[req:${req.id || '-'}] [list] roles=`, roles, 'hasRRHH=', hasRRHH, 'hasADMIN=', hasADMIN, 'hasJefeRRHH=', hasJefeRRHH, 'pideSoloMis=', pideSoloMis)
-  console.log(`[req:${req.id || '-'}] [list] where=`, where, 'page=', page, 'limit=', limit)
+  console.log(`[req:${req.id || '-'}] [list] userId=${req.auth.id} roles=`, roles, 'pideSoloMis=', pideSoloMis, 'page=', page, 'limit=', limit)
 
   // Permiso final: no RRHH/ADMIN/JefeRRHH y no pidió “solo mis” → 403
   if (!hasRRHH && !hasADMIN && !hasJefeRRHH && !pideSoloMis) {
@@ -304,11 +300,9 @@ async function getById(req, res) {
       return res.status(404).json({ error: 'No encontrado' })
     }
 
-    // Verificar autorización: RRHH/ADMIN/JefeRRHH ven todo, el resto solo los suyos
-    const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
-    const isOwner = ref.creadoPorUserId === req.auth.id
-    const isAssignedAdc = ref.asignadoADCUserId === req.auth.id
-    if (!hasRRHH && !hasADMIN && !hasJefeRRHH && !isOwner && !isAssignedAdc) {
+    // Criterio unico de acceso (lib/acceso): privilegiado, creador, postulante
+    // externo o ADC asignado
+    if (!puedeAccederReferido(req.auth, ref)) {
       console.log(`[req:${req.id || '-'}] [getById] 403 – sin permiso`)
       return res.status(403).json({ error: 'Sin permisos para ver este referido' })
     }
@@ -413,13 +407,10 @@ async function getHistorial(req, res) {
 
   try {
     // Verificar autorización antes de devolver historial
-    const ref = await Referido.findByPk(Number(req.params.id), { attributes: ['id', 'creadoPorUserId', 'asignadoADCUserId'] })
+    const ref = await Referido.findByPk(Number(req.params.id), { attributes: ['id', 'creadoPorUserId', 'postulanteUserId', 'asignadoADCUserId'] })
     if (!ref) return res.status(404).json({ error: 'Referido no encontrado' })
 
-    const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
-    const isOwner = ref.creadoPorUserId === req.auth.id
-    const isAssignedAdc = ref.asignadoADCUserId === req.auth.id
-    if (!hasRRHH && !hasADMIN && !hasJefeRRHH && !isOwner && !isAssignedAdc) {
+    if (!puedeAccederReferido(req.auth, ref)) {
       console.log(`[req:${req.id || '-'}] [getHistorial] 403 – sin permiso`)
       return res.status(403).json({ error: 'Sin permisos para ver este historial' })
     }
@@ -460,7 +451,6 @@ async function syncFromGmail(req, res) {
     return res.status(403).json({ error: 'Acceso restringido: se requiere rol RRHH, JefeRRHH o ADMIN' })
   }
 
-  console.log(`[req:${req.id || '-'}] [syncFromGmail] userId=${req.auth.id} body=`, req.body)
 
   try {
     // Usar token centralizado (Secrets Manager, archivo local o .env)

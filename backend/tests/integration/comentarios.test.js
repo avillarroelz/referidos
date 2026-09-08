@@ -160,7 +160,11 @@ describe('Comentarios API', () => {
         roles: ['TRABAJADOR'],
       })
 
-      const ref = await crearReferidoDirecto(rrhhUser.id)
+      // El creador tiene que ser el TRABAJADOR: lo que se prueba aca es el
+      // filtrado por visibleParaRoles, y para llegar a el hay que tener acceso
+      // al referido. Con rrhhUser como creador el trabajador seria un ajeno y
+      // recibiria 403 (ver comentarios-acceso.test.js), sin llegar a filtrar nada.
+      const ref = await crearReferidoDirecto(workerUser.id)
 
       // Comentario solo para RRHH
       const Comentario = getModel('Comentario')
