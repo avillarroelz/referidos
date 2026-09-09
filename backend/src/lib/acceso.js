@@ -8,22 +8,53 @@
 
 const ROL_EXTERNO = 'EXTERNO'
 const ROLES_PRIVILEGIADOS = ['RRHH', 'ADMIN', 'JefeRRHH']
+// Unico estado en que la postulacion todavia no la tomo nadie.
+const ESTADO_INICIAL = 'PENDIENTE'
 
 /**
- * Las cuatro relaciones legitimas con un referido: rol privilegiado, quien lo
- * creo, el postulante externo dueño de su propia postulacion, y el ADC que lo
- * tiene asignado. Un ADC no asignado queda fuera, como cualquier ajeno.
+ * Las cuatro relaciones legitimas con un referido. Se devuelven por separado
+ * porque no todas habilitan lo mismo: leer depende de tener alguna, pero
+ * eliminar depende de CUAL, y el postulante ademas depende del estado.
  */
-function puedeAccederReferido(auth, ref) {
-  if (!auth?.id || !ref) return false
+function relacionesConReferido(auth, ref) {
+  if (!auth?.id || !ref) {
+    return { privilegiado: false, creador: false, postulante: false, adcAsignado: false }
+  }
 
   const roles = auth.roles || []
-  const esPrivilegiado = roles.some(r => ROLES_PRIVILEGIADOS.includes(r))
-  const esCreador = ref.creadoPorUserId === auth.id
-  const esPostulante = ref.postulanteUserId != null && ref.postulanteUserId === auth.id
-  const esAdcAsignado = ref.asignadoADCUserId != null && ref.asignadoADCUserId === auth.id
+  return {
+    privilegiado: roles.some(r => ROLES_PRIVILEGIADOS.includes(r)),
+    creador: ref.creadoPorUserId === auth.id,
+    postulante: ref.postulanteUserId != null && ref.postulanteUserId === auth.id,
+    adcAsignado: ref.asignadoADCUserId != null && ref.asignadoADCUserId === auth.id,
+  }
+}
 
-  return esPrivilegiado || esCreador || esPostulante || esAdcAsignado
+/**
+ * Acceso de LECTURA y de aporte: basta con tener cualquiera de las cuatro
+ * relaciones. Un ADC no asignado queda fuera, como cualquier ajeno.
+ */
+function puedeAccederReferido(auth, ref) {
+  return Object.values(relacionesConReferido(auth, ref)).some(Boolean)
+}
+
+/**
+ * Acceso de ELIMINACION de documentos, mas restrictivo que el de lectura:
+ *  - el ADC NO borra: aporta su informe, pero no elimina la evidencia sobre la
+ *    que dictamina;
+ *  - el postulante externo solo mientras nadie haya tomado su postulacion, o
+ *    sea con el referido aun en PENDIENTE. Despues puede agregar, no quitar.
+ */
+function viaEliminacion(auth, ref) {
+  const rel = relacionesConReferido(auth, ref)
+  if (rel.privilegiado) return 'privilegiado'
+  if (rel.creador) return 'creador'
+  if (rel.postulante && ref?.estado === ESTADO_INICIAL) return 'postulante'
+  return null
+}
+
+function puedeEliminarDocumentos(auth, ref) {
+  return viaEliminacion(auth, ref) !== null
 }
 
 /**
@@ -52,7 +83,10 @@ function requireInterno(req, res, next) {
 }
 
 module.exports = {
+  relacionesConReferido,
   puedeAccederReferido,
+  puedeEliminarDocumentos,
+  viaEliminacion,
   assertReferidoAccess,
   requireInterno,
   ROL_EXTERNO,

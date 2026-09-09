@@ -3,16 +3,22 @@
 const { hash } = require('../../src/utils/hash');
 const { generateAccessToken } = require('../../src/utils/jwt');
 
+// Los seis roles que el codigo de produccion consulta por nombre. Sembrar solo
+// una parte deja fuera de toda prueba a los que falten: JefeRRHH aparece en 26
+// comprobaciones de src/ y EXTERNO en 10, y hasta ahora ningun test de permisos
+// los cubria porque el helper no los creaba.
+const ROLES_DEL_SISTEMA = ['TRABAJADOR', 'RRHH', 'JefeRRHH', 'ADMIN', 'ADC', 'EXTERNO'];
+
 /**
- * Crea los 4 roles base del sistema: TRABAJADOR, RRHH, ADMIN, ADC.
- * Retorna un objeto { TRABAJADOR, RRHH, ADMIN, ADC } con las instancias creadas.
+ * Crea los roles base del sistema.
+ * Retorna un objeto { TRABAJADOR, RRHH, JefeRRHH, ADMIN, ADC, EXTERNO }.
  *
  * @param {Function} getModel - funcion para obtener modelos por alias
  * @returns {Promise<Object>} roles creados
  */
 async function seedRoles(getModel) {
   const Rol = getModel('Rol');
-  const nombres = ['TRABAJADOR', 'RRHH', 'ADMIN', 'ADC'];
+  const nombres = ROLES_DEL_SISTEMA;
   const roles = {};
 
   for (const nombre of nombres) {
@@ -99,4 +105,4 @@ function authHeader(user) {
   return { Authorization: `Bearer ${getAuthToken(user)}` };
 }
 
-module.exports = { seedRoles, createTestUser, getAuthToken, authHeader };
+module.exports = { seedRoles, createTestUser, getAuthToken, authHeader, ROLES_DEL_SISTEMA };

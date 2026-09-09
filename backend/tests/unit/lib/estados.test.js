@@ -118,4 +118,109 @@ describe('Estados y Transiciones', () => {
       })
     })
   })
+
+  // DEBUG_TRANSITIONS es un interruptor que desactiva la maquina de estados
+  // entera: con el encendido, cualquier estado conocido puede pasar a cualquier
+  // otro. Nada mas en la suite lo cubria, asi que un despliegue con la variable
+  // mal puesta no habria roto ninguna prueba.
+  describe('modo laxo DEBUG_TRANSITIONS', () => {
+    const valorOriginal = process.env.DEBUG_TRANSITIONS
+
+    function cargarConDebug(valor) {
+      jest.resetModules()
+      if (valor === undefined) delete process.env.DEBUG_TRANSITIONS
+      else process.env.DEBUG_TRANSITIONS = valor
+      return require('../../../src/lib/estados')
+    }
+
+    afterAll(() => {
+      jest.resetModules()
+      process.env.DEBUG_TRANSITIONS = valorOriginal
+    })
+
+    it.each([
+      ['sin la variable definida', undefined],
+      ['con la variable vacia', ''],
+      ['con "false"', 'false'],
+      ['con "TRUE" en mayusculas', 'TRUE'],
+      ['con "1"', '1'],
+      ['con "yes"', 'yes'],
+    ])('%s rigen las reglas estrictas', (_etiqueta, valor) => {
+      const { puedePasar: pasar } = cargarConDebug(valor)
+      expect(pasar('PENDIENTE', 'APROBADO')).toBe(false)
+      expect(pasar('PENDIENTE', 'EN_REVISION')).toBe(true)
+    })
+
+    it('solo el literal "true" activa el modo laxo', () => {
+      const consola = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const { puedePasar: pasar } = cargarConDebug('true')
+
+      expect(pasar('PENDIENTE', 'APROBADO')).toBe(true)
+      expect(pasar('CONTRATADO', 'PENDIENTE')).toBe(true)
+
+      consola.mockRestore()
+    })
+
+    // Ni siquiera el modo laxo puede inventar estados: si lo hiciera, un typo en
+    // el cliente escribiria un estado inexistente en la base.
+    it('el modo laxo sigue rechazando estados desconocidos', () => {
+      const consola = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      const { puedePasar: pasar } = cargarConDebug('true')
+
+      expect(pasar('PENDIENTE', 'INEXISTENTE')).toBe(false)
+      expect(pasar('INEXISTENTE', 'PENDIENTE')).toBe(false)
+      expect(consola).toHaveBeenCalled()
+
+      consola.mockRestore()
+    })
+  })
+
+  // Invariantes de la maquina, para que agregar un estado nuevo obligue a
+  // conectarlo en vez de dejarlo suelto.
+  describe('invariantes de la maquina de estados', () => {
+    const TERMINALES = ['RECHAZADO', 'CONTRATADO', 'NO_CONTRATADO']
+    const lista = Object.values(ESTADOS)
+
+    it('todo estado no terminal tiene al menos una salida', () => {
+      const sinSalida = lista
+        .filter(e => !TERMINALES.includes(e))
+        .filter(e => !lista.some(destino => puedePasar(e, destino)))
+      expect(sinSalida).toEqual([])
+    })
+
+    it('todo estado excepto el inicial tiene al menos una entrada', () => {
+      const sinEntrada = lista
+        .filter(e => e !== 'PENDIENTE')
+        .filter(e => !lista.some(origen => puedePasar(origen, e)))
+      expect(sinEntrada).toEqual([])
+    })
+
+    it('todo estado es alcanzable desde PENDIENTE', () => {
+      const visitados = new Set(['PENDIENTE'])
+      const cola = ['PENDIENTE']
+      while (cola.length) {
+        const actual = cola.shift()
+        for (const destino of lista) {
+          if (!visitados.has(destino) && puedePasar(actual, destino)) {
+            visitados.add(destino)
+            cola.push(destino)
+          }
+        }
+      }
+      expect(lista.filter(e => !visitados.has(e))).toEqual([])
+    })
+
+    it('desde todo estado se puede llegar a un terminal', () => {
+      const alcanza = (origen, visto = new Set()) => {
+        if (TERMINALES.includes(origen)) return true
+        if (visto.has(origen)) return false
+        visto.add(origen)
+        return lista.some(d => puedePasar(origen, d) && alcanza(d, visto))
+      }
+      // jest no admite un segundo argumento en expect(), asi que el detalle del
+      // estado culpable se conserva juntando los que fallan.
+      const sinSalidaATerminal = lista.filter(e => !alcanza(e))
+      expect(sinSalidaATerminal).toEqual([])
+    })
+  })
 })

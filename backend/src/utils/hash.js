@@ -8,7 +8,10 @@ module.exports = {
   // que delata la existencia de la cuenta. Sin hash no hay coincidencia posible:
   // la respuesta correcta es false, no una excepcion.
   compare: (plain, hashed) => {
-    if (!hashed) return Promise.resolve(false)
+    // Falta cualquiera de los dos -> no hay coincidencia posible. Se compara
+    // `plain` contra null y no por falsedad: la cadena vacia es una contraseña
+    // valida y compare('', hash('')) debe seguir dando true.
+    if (plain == null || !hashed) return Promise.resolve(false)
     return bcrypt.compare(plain, hashed)
   },
 }

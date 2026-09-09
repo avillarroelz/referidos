@@ -7,6 +7,7 @@ const { compare, hash } = require('../utils/hash')
 const { generateTokens, verifyRefreshToken, generateAccessToken } = require('../utils/jwt')
 const { config } = require('../config')
 const { logger, logSecurityEvent } = require('../utils/logger')
+const { emitirState, verificarState, limpiarState } = require('../lib/oauthState')
 const { sendMail } = require('../utils/mailer')
 const googleAuthService = require('../services/googleAuthService')
 
@@ -142,7 +143,7 @@ async function login(req, res) {
 
     const roles = (user.roles || []).map(r => r.nombre)
     const unidadNegocioIds = (user.unidadNegocios || []).map(u => u.id)
-    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds }
+    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds, tokenVersion: user.tokenVersion }
 
     const { accessToken, refreshToken } = generateTokens(payload)
     setAuthCookies(res, accessToken, refreshToken)
@@ -227,9 +228,26 @@ async function refresh(req, res) {
     })
     if (!user || user.estado === false) { clearAuthCookies(res); return res.status(401).json({ error: 'Usuario no válido' }) }
 
+    // ── Revocacion de sesion ──
+    // La comprobacion vive AQUI y no en authRequired a proposito: authRequired
+    // no consulta la base, y hacerlo ahi agregaria una consulta a TODA la API
+    // por cada peticion autenticada. refresh ya carga al usuario, asi que aca
+    // comparar dos enteros no cuesta nada.
+    // La contrapartida aceptada es la ventana: un access token ya emitido sigue
+    // sirviendo hasta que vence, como maximo 20 minutos. Es la misma ventana que
+    // ya se acepta para deshabilitar a un usuario.
+    // Los tokens anteriores a esta funcionalidad no llevan el campo: se tratan
+    // como version 0, que es el valor por defecto de la columna.
+    const versionDelToken = decoded.tokenVersion ?? 0
+    if (versionDelToken !== user.tokenVersion) {
+      clearAuthCookies(res)
+      logSecurityEvent('refresh_revocado', { userId: user.id, ip: req.ip })
+      return res.status(401).json({ error: 'Sesión revocada. Inicia sesión nuevamente.' })
+    }
+
     const roles = (user.roles || []).map(r => r.nombre)
     const unidadNegocioIds = (user.unidadNegocios || []).map(u => u.id)
-    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds }
+    const payload = { id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds, tokenVersion: user.tokenVersion }
     const accessToken = generateAccessToken(payload)
 
     res.cookie('__access_token', accessToken, { ...COOKIE_OPTS, maxAge: 20 * 60 * 1000 })
@@ -340,9 +358,12 @@ async function changePassword(req, res) {
     }
 
     const hashed = await hash(newPassword)
-    await user.update({ password: hashed })
+    // Incrementar tokenVersion invalida TODAS las sesiones del usuario, en este
+    // y en cualquier otro dispositivo. Es lo correcto aca: si alguien cambia su
+    // contraseña porque sospecha que le robaron la sesion, el intruso tiene que
+    // quedar fuera, no solo el navegador que hizo el cambio.
+    await user.update({ password: hashed, tokenVersion: user.tokenVersion + 1 })
 
-    // Invalidar sesiones: limpiar cookies y forzar re-login
     clearAuthCookies(res)
     logSecurityEvent('password_changed', { userId: req.auth.id, ip: req.ip })
 
@@ -448,6 +469,9 @@ async function resetPassword(req, res) {
       resetTokenExpires: null,
       failedAttempts: 0,
       lockedUntil: null,
+      // Mismo motivo que en changePassword: quien recupera su cuenta expulsa a
+      // quien la tuviera abierta.
+      tokenVersion: user.tokenVersion + 1,
     })
 
     logSecurityEvent('password_reset_completed', { userId: user.id, ip: req.ip })
@@ -465,8 +489,16 @@ async function resetPassword(req, res) {
 
 async function googleLogin(req, res) {
   try {
-    const authUrl = googleAuthService.getAuthUrl()
-    res.json({ authUrl })
+    // El state ata esta vuelta al navegador que la pidio. Sin el, el callback no
+    // puede distinguir un regreso legitimo de uno provocado por un tercero, que
+    // es como se fuerza a alguien a quedar con la sesion del atacante abierta.
+    const state = emitirState(res)
+    // Con URL y no concatenando: agregar "&state=" a mano depende de que la URL
+    // ya traiga query string, y si algun dia no la trae el parametro se pierde
+    // en silencio y el callback rechaza todos los inicios.
+    const url = new URL(googleAuthService.getAuthUrl())
+    url.searchParams.set('state', state)
+    res.json({ authUrl: url.toString() })
   } catch (error) {
     logger.error('[auth] Error generando URL de Google:', error)
     res.status(500).json({ error: 'Error al iniciar autenticación con Google' })
@@ -474,12 +506,32 @@ async function googleLogin(req, res) {
 }
 
 async function googleCallback(req, res) {
-  const { code } = req.query
+  const { code, state } = req.query
+
+  // Se verifica ANTES de canjear el codigo y con return: un state invalido
+  // detiene el flujo aqui, no sigue y "ya veremos". Es justo el error del
+  // callback de Gmail, donde el catch no corta y el flujo continua igual.
+  if (!verificarState(req, state)) {
+    limpiarState(res)
+    logSecurityEvent('google_state_invalido', { ip: req.ip })
+    return res.send(buildRedirectPage(`${getFrontendUrl(req)}/login?error=google_auth_failed`))
+  }
+  limpiarState(res)
+
   if (!code) return res.status(400).json({ error: 'Código de autorización no proporcionado' })
 
   try {
     const tokens = await googleAuthService.getTokensFromCode(code)
     const googleUser = await googleAuthService.getUserInfo(tokens.access_token)
+
+    // Sin correo verificado no se vincula ni se crea nada: la identidad de una
+    // cuenta local se decide por su correo, asi que aceptar uno no verificado
+    // permitiria quedarse con la cuenta de otra persona. El mensaje al usuario
+    // es el generico, para no informar de que depende el rechazo.
+    if (googleUser.verifiedEmail !== true) {
+      logSecurityEvent('google_correo_no_verificado', { correo: googleUser.email, ip: req.ip })
+      return res.send(buildRedirectPage(`${getFrontendUrl(req)}/login?error=google_auth_failed`))
+    }
 
     let user = await Usuario.findOne({
       where: { google_id: googleUser.googleId },
@@ -514,7 +566,10 @@ async function googleCallback(req, res) {
 
     const roles = (user.roles || []).map(r => r.nombre)
     const unidadNegocioIds = (user.unidadNegocios || []).map(u => u.id)
-    const { accessToken, refreshToken } = generateTokens({ id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds })
+    // tokenVersion tiene que ir tambien aca: sin el, quien entra con Google y ya
+    // cambio su clave alguna vez lleva version 0 en el token, no coincide con la
+    // suya y queda desconectado en cada renovacion.
+    const { accessToken, refreshToken } = generateTokens({ id: user.id, correo: user.correo, username: user.username, roles, unidadNegocioIds, tokenVersion: user.tokenVersion })
     setAuthCookies(res, accessToken, refreshToken)
 
     logger.info(`[auth] Login con Google exitoso: ${user.correo}`)

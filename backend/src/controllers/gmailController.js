@@ -3,6 +3,11 @@ const gmailService = require('../services/gmailService')
 // Token centralizado de la casilla de sincronización: Secrets Manager en
 // producción, archivo local en desarrollo (ver services/gmailTokenStore.js)
 const tokenStore = require('../services/gmailTokenStore')
+const { emitirState, verificarState, limpiarState } = require('../lib/oauthState')
+const { getModel } = require('../db')
+
+// Roles que pueden conectar la casilla de sincronizacion de la empresa.
+const ROLES_QUE_CONECTAN = ['ADMIN', 'RRHH']
 
 // Exportar para usar en otros controladores (async)
 module.exports.getSyncRefreshToken = tokenStore.getSyncRefreshToken
@@ -161,20 +166,22 @@ exports.getAuthUrl = async (req, res) => {
       'https://www.googleapis.com/auth/gmail.labels'
     ]
 
-    // Incluir userId en state para asociar después
-    const state = Buffer.from(JSON.stringify({
-      userId: req.auth.id,
-      timestamp: Date.now()
-    })).toString('base64')
+    // State FIRMADO y atado a este navegador por cookie (src/lib/oauthState).
+    // Antes era un base64 plano: cualquiera podia fabricarlo, y el callback lo
+    // aceptaba sin verificar nada.
+    const state = emitirState(res, { userId: req.auth.id })
 
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${client_id}&` +
-      `redirect_uri=${encodeURIComponent(redirect_uri)}&` +
-      `response_type=code&` +
-      `scope=${encodeURIComponent(scopes.join(' '))}&` +
-      `access_type=offline&` +
-      `prompt=consent&` +
-      `state=${state}`
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+    url.searchParams.set('client_id', client_id)
+    url.searchParams.set('redirect_uri', redirect_uri)
+    url.searchParams.set('response_type', 'code')
+    url.searchParams.set('scope', scopes.join(' '))
+    url.searchParams.set('access_type', 'offline')
+    url.searchParams.set('prompt', 'consent')
+    // searchParams y no concatenacion: pegar el state a mano depende de que la
+    // URL ya traiga query string y se pierde en silencio si algun dia no la trae.
+    url.searchParams.set('state', state)
+    const authUrl = url.toString()
 
     res.json({
       authUrl,
@@ -203,22 +210,51 @@ exports.gmailOAuthCallback = async (req, res) => {
     return res.redirect(`${frontendUrl}/referidos?gmail_error=${oauthError}`)
   }
 
+  // ── Validacion del state, ANTES de canjear el codigo ──
+  // Va primero a proposito: canjear antes de validar permite que un tercero
+  // provoque llamadas a Google con nuestras credenciales. Y sale con return: la
+  // version anterior decodificaba dentro de un try cuyo catch solo escribia en
+  // consola, asi que un state fabricado, ausente o corrupto continuaba el flujo
+  // y terminaba sobrescribiendo el refresh_token de sincronizacion de toda la
+  // empresa.
+  //
+  // NOTA para quien reciba esto como reporte de error: si alguien inicia la
+  // conexion en un navegador y completa el consentimiento en OTRO, el flujo
+  // falla aqui. Es intencional, no un defecto. La cookie que acompaña al state
+  // es lo unico que permite afirmar que esta vuelta la pidio este navegador; sin
+  // ella la firma sola no protege, porque el atacante puede iniciar su propio
+  // flujo y obtener un state legitimamente firmado.
+  const contenidoState = verificarState(req, state)
+  if (!contenidoState) {
+    limpiarState(res)
+    console.warn('[gmail] state invalido o ausente en el callback')
+    return res.redirect(`${frontendUrl}/referidos?gmail_error=invalid_state`)
+  }
+  limpiarState(res)
+
+  // El comentario que estaba aqui decia que se verificaba que fuera un admin, y
+  // no se verificaba nada. Ahora si: el usuario tiene que existir en la base y
+  // tener uno de los roles que pueden conectar la casilla. Se comprueba contra
+  // la base y no contra el payload porque el payload solo dice a quien se emitio
+  // el state, no si esa persona sigue teniendo el permiso.
+  const Usuario = getModel('Usuario')
+  const Rol = getModel('Rol')
+  const solicitante = await Usuario.findByPk(contenidoState.userId, {
+    include: [{ model: Rol, as: 'roles' }],
+  })
+  const rolesSolicitante = (solicitante?.roles || []).map(r => r.nombre)
+  if (!solicitante || solicitante.estado === false || !rolesSolicitante.some(r => ROLES_QUE_CONECTAN.includes(r))) {
+    console.warn('[gmail] callback rechazado: el solicitante no puede conectar la casilla')
+    return res.redirect(`${frontendUrl}/referidos?gmail_error=forbidden`)
+  }
+
+  const adminId = solicitante.id
+
   if (!code) {
     return res.redirect(`${frontendUrl}/referidos?gmail_error=no_code`)
   }
 
   try {
-    // Decodificar state para verificar que es un admin
-    let adminId = null
-    if (state) {
-      try {
-        const decoded = JSON.parse(Buffer.from(state, 'base64').toString())
-        adminId = decoded.userId
-      } catch (e) {
-        console.error('[gmail] Error decodificando state:', e)
-      }
-    }
-
     // Intercambiar código por tokens
     const { google } = require('googleapis')
     const oauth2Client = new google.auth.OAuth2(

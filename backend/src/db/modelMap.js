@@ -13,4 +13,5 @@ module.exports = {
   Comentario: ['comentario', 'Comentario', 'comentarios'],
   Notificacion: ['notificacion', 'Notificacion', 'notificaciones'],
   Feedback: ['feedback', 'Feedback', 'feedbacks'],
+  AuditoriaDocumento: ['auditoria_documentos', 'AuditoriaDocumento', 'auditoriaDocumento'],
 }

@@ -5,10 +5,11 @@ const { param, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { UPLOAD_DIR } = require('../utils/files')
 const s3Service = require('../services/s3Service')
-const { assertReferidoAccess } = require('../lib/acceso')
+const { assertReferidoAccess, puedeEliminarDocumentos, viaEliminacion } = require('../lib/acceso')
 
 const Referido = getModel('Referido')
 const Documento = getModel('Documento')
+const AuditoriaDocumento = getModel('AuditoriaDocumento')
 const Usuario = getModel('Usuario')
 
 // Verificar si S3 está configurado
@@ -112,6 +113,14 @@ async function remove(req, res) {
   const ref = await Referido.findByPk(id)
   if (!ref) return res.status(404).json({ error: 'Referido no encontrado' })
   if (!(await assertReferidoAccess(req, res, ref))) return
+
+  // Eliminar exige mas que leer: el ADC aporta pero no borra, y el postulante
+  // solo puede quitar documentos mientras nadie haya tomado su postulacion.
+  const via = viaEliminacion(req.auth, ref)
+  if (via === null) {
+    return res.status(403).json({ error: 'Sin permisos para eliminar documentos de este referido' })
+  }
+
   const doc = await Documento.findOne({ where: { id: docId, referidoId: id } })
   if (!doc) return res.status(404).json({ error: 'Documento no encontrado' })
 
@@ -137,6 +146,19 @@ async function remove(req, res) {
       console.warn('⚠️ No se pudo eliminar archivo local:', e.message)
     }
   }
+
+  // La traza se escribe ANTES de destruir la fila: despues, nombre y s3Key ya
+  // no existen en ninguna parte. Ley 21.719, quien elimino que y con que titulo.
+  await AuditoriaDocumento.create({
+    documentoId: doc.id,
+    referidoId: ref.id,
+    actorUserId: req.auth.id,
+    accion: 'ELIMINACION',
+    nombreArchivo: doc.nombre,
+    s3Key: doc.s3Key,
+    viaAcceso: via,
+    ip: req.ip,
+  })
 
   await doc.destroy()
   res.json({ ok: true })

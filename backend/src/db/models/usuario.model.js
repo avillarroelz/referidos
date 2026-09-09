@@ -15,6 +15,10 @@ module.exports = (sequelize, DataTypes) => {
       lockedUntil: { type: DataTypes.DATE, allowNull: true, field: 'locked_until' },
 
       // Password reset
+      // Revocacion de sesion: viaja en el JWT y se compara al renovar. Se
+      // incrementa para invalidar de golpe todo token emitido antes.
+      tokenVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'token_version' },
+
       resetToken: { type: DataTypes.STRING(255), allowNull: true, field: 'reset_token' },
       resetTokenExpires: { type: DataTypes.DATE, allowNull: true, field: 'reset_token_expires' },
 
