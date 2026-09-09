@@ -4,6 +4,7 @@ const { body, param, query, validationResult } = require('express-validator')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS, DICTAMEN_ADC, puedePasar } = require('../lib/estados')
 const { puedeAccederReferido } = require('../lib/acceso')
+const { detalleParaCliente, detalleOGenerico } = require('../lib/detalleError')
 const gmailService = require('../services/gmailService')
 const s3Service = require('../services/s3Service')
 const { config } = require('../config')
@@ -535,7 +536,7 @@ async function syncFromGmail(req, res) {
         // Throttle entre correos
         if (i < messages.length - 1) await new Promise(r => setTimeout(r, 500))
       } catch (err) {
-        results.errors.push({ messageId: messages[i].id, error: err.message })
+        results.errors.push({ messageId: messages[i].id, error: detalleOGenerico(err, 'No se pudo procesar el correo') })
       }
     }
 
@@ -561,7 +562,7 @@ async function syncFromGmail(req, res) {
 
     return res.status(500).json({
       error: 'No se pudieron sincronizar los referidos desde Gmail',
-      details: err.message
+      details: detalleParaCliente(err)
     })
   }
 }
@@ -637,7 +638,7 @@ async function previewGmail(req, res) {
         console.log(`[previewGmail] ${i + 1}/${messages.length} - ${result.parseSource} - ${result.extractedData.nombre || 'sin nombre'}`)
       } catch (err) {
         console.warn(`[previewGmail] Error en correo ${messages[i].id}:`, err.message)
-        send('email_error', { index: i, total: messages.length, messageId: messages[i].id, error: err.message })
+        send('email_error', { index: i, total: messages.length, messageId: messages[i].id, error: detalleOGenerico(err, 'No se pudo procesar el correo') })
       }
 
       // Throttle: 800ms entre llamadas IA para evitar 429
@@ -655,7 +656,7 @@ async function previewGmail(req, res) {
     if (err.code === 401 || err.message?.includes('invalid_grant')) {
       send('error', { error: 'Credenciales de Google inválidas o expiradas', requiresAuth: true })
     } else {
-      send('error', { error: 'No se pudo obtener preview de correos', details: err.message })
+      send('error', { error: 'No se pudo obtener preview de correos', details: detalleParaCliente(err) })
     }
     return res.end()
   }
@@ -815,7 +816,7 @@ async function syncFromGmailManual(req, res) {
       results.errors.push({
         messageId: item.messageId,
         nombre: item.nombre,
-        error: err.message
+        error: detalleOGenerico(err, 'No se pudo procesar el referido')
       })
     }
   }

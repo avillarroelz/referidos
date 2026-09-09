@@ -1,8 +1,21 @@
 // backend/src/routes/integracion.routes.js
+const crypto = require('crypto')
 const router = require('express').Router()
 const { body, param, validationResult } = require('express-validator')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS, puedePasar } = require('../lib/estados')
+
+/**
+ * Compara en tiempo constante. timingSafeEqual exige buffers de igual longitud,
+ * asi que la diferencia de largo se resuelve antes: eso filtra el LARGO de la
+ * llave, no su contenido, y es un compromiso aceptado. No es un descuido.
+ */
+function mismaClave(recibida, esperada) {
+  const a = Buffer.from(String(recibida))
+  const b = Buffer.from(String(esperada))
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
 
 // Middleware: autenticación por API Key
 function requireApiKey(req, res, next) {
@@ -12,8 +25,26 @@ function requireApiKey(req, res, next) {
     return res.status(503).json({ error: 'Integración no configurada' })
   }
 
-  const provided = req.headers['x-api-key'] || req.query.api_key
-  if (!provided || provided !== apiKey) {
+  const porHeader = req.headers['x-api-key']
+  const porQuery = req.query.api_key
+
+  // La llave por query string queda escrita en los access logs del proxy, en
+  // morgan, en el requestLogger y viaja en la cabecera Referer. Es exactamente
+  // lo que este backend ya evita para el JWT (ver middleware/auth.js).
+  //
+  // Se sigue aceptando SOLO de forma transitoria: no consta en el repositorio
+  // quien consume este endpoint ni por que via manda la llave, asi que cortarla
+  // a ciegas podria romper una integracion en produccion. Este aviso permite
+  // comprobarlo con datos: si no aparece en los logs de unos dias, la via por
+  // query se elimina sin consultar a nadie.
+  // El aviso NO incluye la llave ni ningun fragmento suyo: seria escribir en el
+  // log justo lo que se quiere sacar de el.
+  if (!porHeader && porQuery) {
+    console.warn(`[integracion] api key por query string (en desuso) ip=${req.ip} ruta=${req.originalUrl.split('?')[0]}`)
+  }
+
+  const provided = porHeader || porQuery
+  if (!provided || !mismaClave(provided, apiKey)) {
     console.warn('[integracion] API Key inválida o ausente')
     return res.status(401).json({ error: 'API Key inválida o no proporcionada' })
   }

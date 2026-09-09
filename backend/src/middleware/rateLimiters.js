@@ -121,6 +121,49 @@ const authRefreshLimiter = rateLimit({
 })
 
 // ──────────────────────────────────────────────────────────────
+// Capa 2d — Recuperacion de contraseña: contador PROPIO
+// Antes compartia el de refresh, 20 por 15 min por IP, con dos problemas: se
+// podian disparar 20 correos al buzon de un tercero, y abusar de una ruta
+// dejaba sin cuota a la otra, o sea sin renovar sesion a toda una oficina con
+// NAT. Se cuenta por CORREO DESTINO, porque el daño se dirige a una persona
+// concreta y no depende de desde donde se pida, y ademas por IP, porque sin ese
+// segundo techo bastaria con rotar el destinatario para seguir enviando.
+// ──────────────────────────────────────────────────────────────
+const LIMITE_POR_CORREO = 3
+const LIMITE_POR_IP = 20
+const VENTANA_FORGOT_MS = 60 * 60 * 1000
+
+const mensajeForgot = {
+  error: 'Demasiadas solicitudes de recuperación. Intenta de nuevo más tarde.',
+  code: 'TOO_MANY_REQUESTS',
+}
+
+const forgotPasswordCorreoLimiter = rateLimit({
+  windowMs: VENTANA_FORGOT_MS,
+  max: LIMITE_POR_CORREO,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: mensajeForgot,
+  keyGenerator: (req) => {
+    const correo = req.body?.correo?.toLowerCase()?.trim()
+    return correo ? `forgot:correo:${correo}` : `forgot:sin-correo:${ipKeyGenerator(req.ip)}`
+  },
+})
+
+const forgotPasswordIpLimiter = rateLimit({
+  windowMs: VENTANA_FORGOT_MS,
+  max: LIMITE_POR_IP,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: mensajeForgot,
+  keyGenerator: (req) => `forgot:ip:${ipKeyGenerator(req.ip)}`,
+})
+
+// Se exportan por separado, sin agruparlos en un array: montados como array,
+// Express los aplana y dejan de ser identificables uno a uno, lo que rompe la
+// comprobacion de que todo limitador exportado este efectivamente montado.
+
+// ──────────────────────────────────────────────────────────────
 // Capa 3 — Operaciones pesadas: Gmail sync, IA, APIs externas
 // ──────────────────────────────────────────────────────────────
 const heavyOpsLimiter = rateLimit({
@@ -155,6 +198,8 @@ module.exports = {
   authLoginIpLimiter,
   authRegisterLimiter,
   authRefreshLimiter,
+  forgotPasswordIpLimiter,
+  forgotPasswordCorreoLimiter,
   heavyOpsLimiter,
   publicFormLimiter,
 }

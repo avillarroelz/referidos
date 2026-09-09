@@ -1,7 +1,7 @@
 // backend/src/routes/auth.routes.js
 const router = require('express').Router()
 const { authRequired } = require('../middleware/auth')
-const { authLoginLimiter, authLoginIpLimiter, authRegisterLimiter, authRefreshLimiter } = require('../middleware/rateLimiters')
+const { authLoginLimiter, authLoginIpLimiter, authRegisterLimiter, authRefreshLimiter, forgotPasswordIpLimiter, forgotPasswordCorreoLimiter } = require('../middleware/rateLimiters')
 const {
   login, loginValidators,
   register, registerValidators,
@@ -18,7 +18,7 @@ router.post('/login', authLoginIpLimiter, authLoginLimiter, loginValidators, log
 router.post('/register', authRegisterLimiter, registerValidators, register)
 router.post('/refresh', authRefreshLimiter, refresh)
 router.post('/logout', logout)
-router.post('/forgot-password', authRefreshLimiter, forgotPasswordValidators, forgotPassword)
+router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordCorreoLimiter, forgotPasswordValidators, forgotPassword)
 router.post('/reset-password', authRefreshLimiter, resetPasswordValidators, resetPassword)
 
 // Google OAuth

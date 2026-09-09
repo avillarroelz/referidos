@@ -4,6 +4,7 @@ const gmailService = require('../services/gmailService')
 // producción, archivo local en desarrollo (ver services/gmailTokenStore.js)
 const tokenStore = require('../services/gmailTokenStore')
 const { emitirState, verificarState, limpiarState } = require('../lib/oauthState')
+const { detalleParaCliente } = require('../lib/detalleError')
 const { getModel } = require('../db')
 
 // Roles que pueden conectar la casilla de sincronizacion de la empresa.
@@ -66,7 +67,7 @@ exports.processGmailReferidos = async (req, res) => {
     console.error('Error en processGmailReferidos:', error)
     res.status(500).json({
       error: 'Error procesando correos de Gmail',
-      details: error.message
+      details: detalleParaCliente(error)
     })
   }
 }
@@ -139,7 +140,7 @@ exports.previewGmailReferidos = async (req, res) => {
     console.error('Error en previewGmailReferidos:', error)
     res.status(500).json({
       error: 'Error obteniendo vista previa de correos',
-      details: error.message
+      details: detalleParaCliente(error)
     })
   }
 }
@@ -191,7 +192,7 @@ exports.getAuthUrl = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Error generando URL de autorización',
-      details: error.message
+      details: detalleParaCliente(error)
     })
   }
 }

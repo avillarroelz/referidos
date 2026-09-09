@@ -1,5 +1,6 @@
 // backend/src/controllers/auth.controller.js
 const crypto = require('crypto')
+const bcrypt = require('bcryptjs')
 const { Op } = require('sequelize')
 const { body, validationResult } = require('express-validator')
 const { getModel } = require('../db')
@@ -16,6 +17,11 @@ const Usuario = getModel('Usuario')
 // ──────────────────────────────────────────────────────────────
 // Constantes de lockout
 // ──────────────────────────────────────────────────────────────
+// Hash de descarte para comparar cuando el correo no existe. Se genera una vez
+// al cargar el modulo, con el mismo coste que los reales, para que un intento
+// contra una cuenta inexistente tarde lo mismo que contra una existente.
+const HASH_SEÑUELO = bcrypt.hashSync('cuenta-inexistente-hash-de-descarte', 12)
+
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_MINUTES = 30
 
@@ -92,12 +98,63 @@ async function login(req, res) {
       ]
     })
 
-    if (!user) {
-      logSecurityEvent('failed_login', { reason: 'user_not_found', correo, ip: req.ip, ua: req.headers['user-agent'] })
+    // ── El estado de la cuenta se resuelve DESPUES de comprobar la contraseña ──
+    //
+    // Antes se resolvia antes, y eso convertia al login en un oraculo: el 423 de
+    // cuenta bloqueada y el 403 de deshabilitada confirmaban que la cuenta
+    // EXISTE a quien no tenia ninguna credencial. Peor todavia, como el bloqueo
+    // salta a los cinco intentos, se podia bloquear una cuenta a proposito para
+    // usar el 423 como confirmacion, que ademas deja a esa persona sin servicio.
+    //
+    // Ahora, sin la contraseña correcta todas las respuestas son el mismo 401.
+    // El estado se informa unicamente a quien ya demostro ser el dueño.
+    //
+    // NO ES UN DEBILITAMIENTO DEL LOCKOUT, aunque a primera vista lo parezca:
+    // una cuenta bloqueada ya no corta antes de comparar, asi que si se pueden
+    // seguir probando contraseñas contra ella, pero aunque el atacante ACIERTE
+    // no obtiene sesion, porque el camino de cuenta bloqueada responde 423 sin
+    // emitir tokens. El lockout impide el acceso, no el intento, y eso sigue
+    // intacto. Si alguien "arregla" esto devolviendo el corte temprano, reabre
+    // el oraculo.
+    //
+    // El coste es ejecutar bcrypt tambien para correos inexistentes y cuentas
+    // bloqueadas. Queda acotado por los dos limitadores del login, por correo y
+    // por IP, asi que el techo de comparaciones que puede forzar un atacante no
+    // cambia respecto de antes.
+
+    // Se compara SIEMPRE, incluso sin usuario, contra un hash señuelo: si no, la
+    // diferencia de tiempo entre "existe" y "no existe" delata lo mismo que ya
+    // no delatan los codigos de respuesta.
+    const hashAComparar = user?.password || HASH_SEÑUELO
+    const passwordOk = await compare(password, hashAComparar)
+
+    if (!user || !user.password || !passwordOk) {
+      // Un motivo distinto por caso para el registro interno; la respuesta al
+      // cliente es siempre la misma.
+      let reason = 'wrong_password'
+      if (!user) reason = 'user_not_found'
+      else if (!user.password) reason = 'oauth_account'
+
+      if (user && user.password) {
+        // Solo cuentan los intentos contra una cuenta con contraseña local.
+        const attempts = (user.failedAttempts || 0) + 1
+        const updateData = { failedAttempts: attempts }
+        if (attempts >= MAX_FAILED_ATTEMPTS) {
+          updateData.lockedUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000)
+          logSecurityEvent('account_locked', { correo, ip: req.ip, attempts, lockMinutes: LOCKOUT_MINUTES })
+        } else {
+          logSecurityEvent('failed_login', { reason, correo, ip: req.ip, attempts, ua: req.headers['user-agent'] })
+        }
+        await user.update(updateData)
+      } else {
+        logSecurityEvent('failed_login', { reason, correo, ip: req.ip, ua: req.headers['user-agent'] })
+      }
+
       return res.status(401).json({ error: 'Credenciales inválidas' })
     }
 
-    // Verificar lockout
+    // Desde aqui la contraseña es correcta: quien pregunta es el dueño de la
+    // cuenta, asi que informarle su estado no revela nada a un tercero.
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
       const remaining = Math.ceil((new Date(user.lockedUntil) - new Date()) / 1000)
       logSecurityEvent('login_blocked_locked', { correo, ip: req.ip, remainingSeconds: remaining })
@@ -111,31 +168,6 @@ async function login(req, res) {
     if (user.estado === false) {
       logSecurityEvent('login_blocked_disabled', { correo, ip: req.ip })
       return res.status(403).json({ error: 'Usuario deshabilitado' })
-    }
-
-    // Cuenta creada con Google: no hay contraseña local que comparar. Se
-    // responde el MISMO 401 generico que un correo inexistente o una clave
-    // equivocada, para no revelar que la cuenta existe ni como se autentica.
-    if (!user.password) {
-      logSecurityEvent('failed_login', { reason: 'oauth_account', correo, ip: req.ip, ua: req.headers['user-agent'] })
-      return res.status(401).json({ error: 'Credenciales inválidas' })
-    }
-
-    const passwordOk = await compare(password, user.password)
-    if (!passwordOk) {
-      // Incrementar intentos fallidos
-      const attempts = (user.failedAttempts || 0) + 1
-      const updateData = { failedAttempts: attempts }
-
-      if (attempts >= MAX_FAILED_ATTEMPTS) {
-        updateData.lockedUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000)
-        logSecurityEvent('account_locked', { correo, ip: req.ip, attempts, lockMinutes: LOCKOUT_MINUTES })
-      } else {
-        logSecurityEvent('failed_login', { reason: 'wrong_password', correo, ip: req.ip, attempts, ua: req.headers['user-agent'] })
-      }
-
-      await user.update(updateData)
-      return res.status(401).json({ error: 'Credenciales inválidas' })
     }
 
     // Login exitoso: resetear lockout
