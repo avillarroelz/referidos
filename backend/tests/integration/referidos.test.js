@@ -193,6 +193,41 @@ describe('Referidos CRUD API', () => {
     })
   })
 
+  // Regresión: el include hasMany 'adjuntos' hacía que count sumara filas del JOIN
+  describe('total de los listados con referidos que tienen varios adjuntos', () => {
+    let rrhhUser, adcUser
+
+    beforeEach(async () => {
+      rrhhUser = await createTestUser(getModel, { username: 'rrhh2', correo: 'rrhh2@test.com', roles: ['RRHH'] })
+      adcUser = await createTestUser(getModel, { username: 'adc2', correo: 'adc2@test.com', roles: ['ADC'] })
+      const referido = await getModel('Referido').create({
+        nombre: 'Ref Con Docs', email: 'docs@test.com', estado: 'PENDIENTE',
+        creadoPorUserId: rrhhUser.id, asignadoADCUserId: adcUser.id,
+      })
+      for (const nombre of ['cv.pdf', 'carta.pdf']) {
+        await getModel('Documento').create({
+          nombre, ruta: `uploads/referidos/${nombre}`, mimetype: 'application/pdf', size: 1024, referidoId: referido.id,
+        })
+      }
+    })
+
+    it('el listado general cuenta el referido una sola vez', async () => {
+      const res = await request(app).get('/api/referidos').set(authHeader(rrhhUser))
+
+      expect(res.status).toBe(200)
+      expect(res.body.total).toBe(1)
+      expect(res.body.data[0].adjuntos_count).toBe(2)
+    })
+
+    it('la bandeja del ADC cuenta el referido una sola vez', async () => {
+      const res = await request(app).get('/api/referidos/mis-asignados').set(authHeader(adcUser))
+
+      expect(res.status).toBe(200)
+      expect(res.body.total).toBe(1)
+      expect(res.body.data[0].adjuntos_count).toBe(2)
+    })
+  })
+
   // ──────────────────────────────────────────────────────────────
   // GET /api/referidos/stats
   // ──────────────────────────────────────────────────────────────

@@ -254,6 +254,7 @@ async function list(req, res) {
       ],
       order: [['id', 'DESC']],
       limit,
+      distinct: true,
       offset,
     })
     const ms = Date.now() - t0
@@ -1073,6 +1074,7 @@ async function listarParaADC(req, res) {
       ],
       order: [['id', 'DESC']],
       limit,
+      distinct: true,
       offset,
     })
 
