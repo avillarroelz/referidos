@@ -7,6 +7,7 @@ const path = require('path')
 const { body, validationResult } = require('express-validator')
 const { sequelize, getModel } = require('../db')
 const s3Service = require('../services/s3Service')
+const { logger } = require('../utils/logger')
 
 const Feedback = () => getModel('Feedback')
 const Usuario = () => getModel('Usuario')
@@ -201,7 +202,11 @@ async function guardarImagen(file, feedbackId) {
       try { fs.unlinkSync(file.path) } catch {}
       console.log(`✅ imagen feedback subida a S3: ${s3Key}`)
     } catch (e) {
-      console.warn('⚠️ Falló S3 (feedback), guardando localmente:', e.message)
+      // La key ya estaba asignada: sin esto la metadata afirma estar en S3 y no lo está.
+      s3Key = null
+      logger.error('[feedback] Falló la subida a S3, queda solo copia local', {
+        feedbackId, archivo: file.originalname, error: e.message,
+      })
     }
   }
 

@@ -7,6 +7,7 @@ const { puedeAccederReferido } = require('../lib/acceso')
 const { detalleParaCliente, detalleOGenerico } = require('../lib/detalleError')
 const gmailService = require('../services/gmailService')
 const s3Service = require('../services/s3Service')
+const { logger } = require('../utils/logger')
 const { config } = require('../config')
 const { notificarCambioEstado, notificarAsignacion } = require('../services/notificationService')
 const fs = require('fs')
@@ -773,7 +774,11 @@ async function syncFromGmailManual(req, res) {
                 rutaFinal = s3Key
                 console.log(`[syncGmailManual] S3: ${att.filename} -> ${s3Key}`)
               } catch (s3Err) {
-                console.warn(`[syncGmailManual] S3 fallo para ${att.filename}, guardando local:`, s3Err.message)
+                // La key ya estaba asignada: sin esto la fila afirma estar en S3 y no lo está.
+                s3Key = null
+                logger.error('[syncGmailManual] Falló la subida a S3, queda solo copia local', {
+                  referidoId: referido.id, archivo: att.filename, error: s3Err.message,
+                })
               }
             }
 

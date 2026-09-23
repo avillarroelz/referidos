@@ -9,6 +9,7 @@ const { sequelize, getModel } = require('../db')
 const { ESTADOS } = require('../lib/estados')
 const { notificarNuevoReferidoPublico } = require('../services/notificationService')
 const s3Service = require('../services/s3Service')
+const { logger } = require('../utils/logger')
 
 const Referido = () => getModel('Referido')
 const EstadoHistorial = () => getModel('EstadoHistorial')
@@ -240,7 +241,11 @@ async function guardarDocumento(file, ref, rut, tipo, t) {
       try { fs.unlinkSync(file.path) } catch {}
       console.log(`✅ ${tipo} subido a S3: ${s3Key}`)
     } catch (e) {
-      console.warn('⚠️ Falló S3, guardando localmente:', e.message)
+      // La key ya estaba asignada: sin esto la fila afirma estar en S3 y no lo está.
+      s3Key = null
+      logger.error('[postulaciones] Falló la subida a S3, queda solo copia local', {
+        referidoId: ref.id, archivo: file.originalname, tipo, error: e.message,
+      })
     }
   }
 

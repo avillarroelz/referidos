@@ -5,6 +5,7 @@ const { param, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { UPLOAD_DIR } = require('../utils/files')
 const s3Service = require('../services/s3Service')
+const { logger } = require('../utils/logger')
 const { assertReferidoAccess, puedeEliminarDocumentos, viaEliminacion } = require('../lib/acceso')
 
 const Referido = getModel('Referido')
@@ -75,9 +76,11 @@ async function upload(req, res) {
           console.warn('No se pudo eliminar archivo temporal:', e.message)
         }
       } catch (error) {
-        console.error('❌ Error subiendo a S3:', error)
-        // Si falla S3, guardar localmente como fallback
-        console.warn('⚠️ Fallback: guardando archivo localmente')
+        // La key ya estaba asignada: sin esto la fila afirma estar en S3 y no lo está.
+        s3Key = null
+        logger.error('[adjuntos] Falló la subida a S3, queda solo copia local', {
+          referidoId: id, archivo: file.originalname, error: error.message,
+        })
       }
     }
 
