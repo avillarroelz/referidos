@@ -73,11 +73,10 @@ describe('Hash Utils', () => {
       await expect(compare('mypassword', hashAlmacenado)).resolves.toBe(false)
     })
 
-    // PENDIENTE (reportado al lider): el fix cubrio el hash nulo pero no la
-    // contraseña nula, que sigue lanzando "Illegal arguments". Hoy no es
-    // explotable porque express-validator exige que password sea string antes
-    // de llegar al controlador, pero es la misma linea de defensa.
-    it.skip('debe rechazar una contraseña nula contra un hash válido', async () => {
+    // Misma linea de defensa que el hash nulo: bcrypt lanza "Illegal arguments"
+    // con una contraseña nula. Hoy express-validator lo frena antes, pero
+    // compare() no debe depender de eso.
+    it('debe rechazar una contraseña nula contra un hash válido', async () => {
       await expect(compare(null, await hash('mypassword'))).resolves.toBe(false)
     })
 
