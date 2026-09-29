@@ -442,6 +442,23 @@ const syncGmailValidators = [
   body('skipDuplicates').optional().isBoolean(),
 ]
 
+// Idempotencia del import: un correo de Gmail se importa una sola vez.
+async function referidoYaImportado(messageId) {
+  const existente = await Referido.findOne({ where: { gmailMessageId: messageId } })
+  return existente ? `Duplicado: ya importado como referido #${existente.id}` : null
+}
+
+// Dos imports concurrentes del mismo correo pasan el chequeo previo y el
+// segundo create choca con el indice UNIQUE: se reporta como Duplicado. Solo
+// ese indice: un UNIQUE de otra tabla (historial, documentos) es un error real.
+async function duplicadoPorCarrera(err, messageId) {
+  if (err.name !== 'SequelizeUniqueConstraintError') return null
+  const esDelMessageId = err.parent?.constraint === 'referidos_gmail_message_id_unique'
+    || err.errors?.some(e => e.path === 'gmail_message_id')
+  if (!esDelMessageId) return null
+  return referidoYaImportado(messageId).catch(() => null)
+}
+
 async function syncFromGmail(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
@@ -499,6 +516,12 @@ async function syncFromGmail(req, res) {
 
     for (let i = 0; i < messages.length; i++) {
       try {
+        const duplicado = await referidoYaImportado(messages[i].id)
+        if (duplicado) {
+          results.errors.push({ messageId: messages[i].id, error: duplicado })
+          continue
+        }
+
         const emailData = await gmailService.processOneEmail(messages[i].id)
         results.processed++
 
@@ -528,7 +551,8 @@ async function syncFromGmail(req, res) {
           observaciones: d.observaciones || null,
           nombreReferidor: d.nombreReferidor || null,
           estado: ESTADOS.PENDIENTE,
-          creadoPorUserId: req.auth.id
+          creadoPorUserId: req.auth.id,
+          gmailMessageId: messages[i].id
         })
         results.created++
 
@@ -538,7 +562,8 @@ async function syncFromGmail(req, res) {
         // Throttle entre correos
         if (i < messages.length - 1) await new Promise(r => setTimeout(r, 500))
       } catch (err) {
-        results.errors.push({ messageId: messages[i].id, error: detalleOGenerico(err, 'No se pudo procesar el correo') })
+        const duplicado = await duplicadoPorCarrera(err, messages[i].id)
+        results.errors.push({ messageId: messages[i].id, error: duplicado || detalleOGenerico(err, 'No se pudo procesar el correo') })
       }
     }
 
@@ -618,14 +643,14 @@ async function previewGmail(req, res) {
     const messages = await gmailService.searchEmails(searchQuery, maxResults)
 
     if (!messages || messages.length === 0) {
-      send('done', { count: 0, emails: [] })
+      send('done', { count: 0 })
       return res.end()
     }
 
     send('total', { total: messages.length })
     console.log(`[previewGmail] Procesando ${messages.length} correos con SSE...`)
 
-    const emailsWithData = []
+    let count = 0
     for (let i = 0; i < messages.length; i++) {
       // Verificar si el cliente desconectó
       if (req.socket.destroyed) {
@@ -635,7 +660,7 @@ async function previewGmail(req, res) {
 
       try {
         const result = await gmailService.processOneEmail(messages[i].id)
-        emailsWithData.push(result)
+        count++
         send('email', { index: i, total: messages.length, email: result })
         console.log(`[previewGmail] ${i + 1}/${messages.length} - ${result.parseSource} - ${result.extractedData.nombre || 'sin nombre'}`)
       } catch (err) {
@@ -649,7 +674,7 @@ async function previewGmail(req, res) {
       }
     }
 
-    send('done', { count: emailsWithData.length, emails: emailsWithData })
+    send('done', { count })
     return res.end()
 
   } catch (err) {
@@ -709,6 +734,12 @@ async function syncFromGmailManual(req, res) {
 
   for (const item of referidosInput) {
     try {
+      const duplicado = await referidoYaImportado(item.messageId)
+      if (duplicado) {
+        results.errors.push({ messageId: item.messageId, nombre: item.nombre, error: duplicado })
+        continue
+      }
+
       // Verificar duplicados por RUT o email
       const duplicateWhere = []
       if (item.rut) duplicateWhere.push({ rut: item.rut })
@@ -735,7 +766,8 @@ async function syncFromGmailManual(req, res) {
         observaciones: item.observaciones || null,
         nombreReferidor: item.nombreReferidor || null,
         estado: ESTADOS.PENDIENTE,
-        creadoPorUserId: req.auth.id
+        creadoPorUserId: req.auth.id,
+        gmailMessageId: item.messageId
       })
 
       await EstadoHistorial.create({
@@ -818,11 +850,12 @@ async function syncFromGmailManual(req, res) {
         messageId: item.messageId
       })
     } catch (err) {
-      console.error(`[syncGmailManual] Error creando referido:`, err.message)
+      const duplicado = await duplicadoPorCarrera(err, item.messageId)
+      if (!duplicado) console.error(`[syncGmailManual] Error creando referido:`, err.message)
       results.errors.push({
         messageId: item.messageId,
         nombre: item.nombre,
-        error: detalleOGenerico(err, 'No se pudo procesar el referido')
+        error: duplicado || detalleOGenerico(err, 'No se pudo procesar el referido')
       })
     }
   }

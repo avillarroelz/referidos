@@ -1,4 +1,5 @@
 // backend/src/db/models/referido.model.js
+const { Op } = require('sequelize')
 const { ESTADOS } = require('../../lib/estados')
 
 module.exports = (sequelize, DataTypes) => {
@@ -108,6 +109,13 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: false,
         field: 'origen_publico',
       },
+
+      // Correo de Gmail del que se importó: hace idempotente el import
+      gmailMessageId: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: 'gmail_message_id',
+      },
     },
     {
       tableName: 'referidos',
@@ -123,6 +131,12 @@ module.exports = (sequelize, DataTypes) => {
         { fields: ['unidad_negocio_id'] },
         { fields: ['asignado_adc_user_id'] },
         { fields: ['sla_deadline'] },
+        {
+          name: 'referidos_gmail_message_id_unique',
+          unique: true,
+          fields: ['gmail_message_id'],
+          where: { gmail_message_id: { [Op.ne]: null } },
+        },
       ],
     }
   )
