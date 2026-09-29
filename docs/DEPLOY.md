@@ -3,10 +3,11 @@
 Procedimiento para publicar en la EC2 de `sa-east-1`. El stack es
 `docker-compose` con imágenes desde ECR y Caddy resolviendo TLS en el borde.
 
-> **Este documento describe el despliegue del entorno cuyo `backend.env` apunta a
-> `database-test` / `referidos_test` / `ecora-referidos-test`.** Si se despliega
-> contra la base productiva, todo lo de abajo aplica igual pero el paso 1 deja de
-> ser opcional.
+> **Este documento describe el despliegue de `referidos.ecoraapp.com`, cuyo
+> `backend.env` apunta a la instancia dedicada `referidos-prod-db` (desde el
+> 23-09-2026; sin acceso público) y al bucket `ecora-referidos-prod`.** Esa base
+> tiene datos reales: el respaldo del paso 1 no es opcional. La base anterior,
+> `referidos_prod` en `database-test`, quedó intacta solo como respaldo de rollback.
 
 ---
 
@@ -38,7 +39,7 @@ lo que `sync({ alter: true })` pudiera haber hecho si estaba activo.
 
 ```bash
 aws rds create-db-snapshot \
-  --db-instance-identifier database-test \
+  --db-instance-identifier referidos-prod-db \
   --db-snapshot-identifier referidos-pre-deploy-$(date +%Y%m%d-%H%M) \
   --region sa-east-1
 ```
@@ -54,15 +55,22 @@ docker compose images
 
 ## 2. Migraciones (antes de la imagen nueva)
 
-Las dos son idempotentes (`IF NOT EXISTS` / comprobación en `information_schema`),
+Todas son idempotentes (`IF NOT EXISTS` / comprobación en `information_schema`),
 así que repetirlas no rompe nada. Van **antes** del código nuevo porque el
-backend nuevo lee `token_version`; el backend viejo ignora ambas, de modo que
-entre la migración y el despliegue el sistema sigue funcionando.
+backend nuevo lee `token_version` y `gmail_message_id`; el backend viejo las
+ignora, de modo que entre la migración y el despliegue el sistema sigue funcionando.
 
 ```bash
 node src/scripts/migrate.js add-token-version-to-usuarios.sql
 node src/scripts/migrate.js create-auditoria-documentos-table.sql
+node src/scripts/migrate.js add-gmail-message-id-to-referidos.sql
 ```
+
+`add-gmail-message-id-to-referidos.sql` (29-09-2026) es **obligatoria** con
+`SYNC_DB=false`: el modelo `Referido` ya declara la columna y sin ella todo
+`SELECT` sobre `referidos` falla. Agrega el índice único parcial
+`referidos_gmail_message_id_unique`, que impide importar dos veces el mismo
+correo de Gmail. Lo importado antes de esta fecha no queda protegido (sin backfill).
 
 `migrate.js` toma la conexión de las variables de entorno vía `dotenv`, así que
 hay que ejecutarlo donde esas variables apunten a la base correcta — dentro del
@@ -74,6 +82,7 @@ Verificación:
 SELECT column_name FROM information_schema.columns
  WHERE table_name = 'usuarios' AND column_name = 'token_version';
 SELECT to_regclass('auditoria_documentos');
+SELECT to_regclass('referidos_gmail_message_id_unique');
 ```
 
 ---
