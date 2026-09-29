@@ -3,8 +3,6 @@ const router = require('express').Router()
 const { authRequired, requireRoles } = require('../middleware/auth')
 const { heavyOpsLimiter } = require('../middleware/rateLimiters')
 const {
-  processGmailReferidos,
-  previewGmailReferidos,
   getAuthUrl,
   gmailOAuthCallback,
   getGmailStatus
@@ -24,29 +22,16 @@ router.use(heavyOpsLimiter)
 /**
  * GET /api/gmail/status
  * Obtener estado de configuracion de Gmail
- * Requiere rol: ADMIN o RRHH
+ * Requiere rol: ADMIN, RRHH o JefeRRHH
  */
-router.get('/status', requireRoles('RRHH', 'ADMIN'), getGmailStatus)
-
-/**
- * POST /api/gmail/process
- * Procesar correos de Gmail y crear referidos
- * Requiere rol: ADMIN o RRHH
- */
-router.post('/process', requireRoles('RRHH', 'ADMIN'), processGmailReferidos)
-
-/**
- * POST /api/gmail/preview
- * Vista previa de correos sin procesarlos
- * Requiere rol: ADMIN o RRHH
- */
-router.post('/preview', requireRoles('RRHH', 'ADMIN'), previewGmailReferidos)
+router.get('/status', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), getGmailStatus)
 
 /**
  * GET /api/gmail/auth-url
  * Obtener URL de autorización OAuth2
  * Requiere rol: ADMIN o RRHH
  */
+// Sin JefeRRHH a proposito: el callback no valida que la cuenta autorizada sea la casilla de reclutamiento.
 router.get('/auth-url', requireRoles('RRHH', 'ADMIN'), getAuthUrl)
 
 module.exports = router

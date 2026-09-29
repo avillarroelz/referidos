@@ -1,7 +1,7 @@
 // backend/tests/integration/permisos-matriz.test.js
 //
 // Matriz de autorizacion por rol de los endpoints que no tenian red: kpis,
-// roles, unidades, feedback, notificaciones, postulaciones y adjuntos.
+// roles, unidades, feedback, notificaciones, postulaciones, gmail y adjuntos.
 //
 // La suite recorre CADA endpoint contra CADA rol del sistema. Se afirma sobre la
 // autorizacion y nada mas: un rol permitido no puede recibir 401 ni 403 (puede
@@ -90,6 +90,13 @@ const ENDPOINTS = [
     permitidos: CUALQUIER_AUTENTICADO,
     body: { nombre: 'Postulante Matriz', email: 'matriz@test.com', cargoPostulado: 'Analista' },
   },
+
+  // ── Gmail: JefeRRHH solo ve el estado (minimo privilegio) ──
+  // auth-url niega a JefeRRHH a proposito: el callback no valida que la cuenta
+  // autorizada sea la casilla de reclutamiento. Sin esperado: su codigo depende
+  // de GMAIL_CLIENT_ID. process y preview se retiraron (ver mas abajo).
+  { grupo: 'gmail', method: 'get', path: '/api/gmail/status', permitidos: PRIVILEGIADOS, esperado: 200 },
+  { grupo: 'gmail', method: 'get', path: '/api/gmail/auth-url', permitidos: ADMIN_Y_RRHH },
 ]
 
 // Los adjuntos van aparte: cuelgan de un referido y su controlador aplica
@@ -207,6 +214,18 @@ describe('Matriz de permisos por rol', () => {
       }
     }
   )
+
+  // Retiradas: recibian un refresh_token por body y repuntaban el singleton de
+  // gmailService a otra cuenta de Google. Ningun rol las alcanza.
+  describe.each([
+    ['post', '/api/gmail/process'],
+    ['post', '/api/gmail/preview'],
+  ])('gmail — %s %s (retirada)', (method, path) => {
+    it.each(ROLES_DEL_SISTEMA)('%s recibe 404', async (rol) => {
+      const res = await construir({ method, path, body: {} }, usuarios[rol])
+      expect(res.status).toBe(404)
+    })
+  })
 
   // Un token valido pero con un rol que no existe en el sistema no puede abrir
   // ningun endpoint restringido: la autorizacion tiene que ser lista blanca.

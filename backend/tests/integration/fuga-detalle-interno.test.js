@@ -23,7 +23,6 @@ jest.mock('../../src/services/gmailService', () => ({
   initialize: jest.fn(async () => {
     throw new Error('ENOENT: no such file or directory, open /app/secrets/gmail.json')
   }),
-  processEmails: jest.fn(),
   searchEmails: jest.fn(),
   getEmail: jest.fn(),
   parseEmailContent: jest.fn(),
@@ -74,30 +73,6 @@ describe('V21: detalle interno en las respuestas de error', () => {
 
   afterEach(() => {
     config.isProd = isProdOriginal
-  })
-
-  describe('POST /api/gmail/process', () => {
-    it('no devuelve el mensaje de la excepcion', async () => {
-      const res = await request(app)
-        .post('/api/gmail/process')
-        .set(authHeader(admin))
-        .send({ credentials: { refresh_token: 'x' } })
-
-      expect(res.status).toBe(500)
-      noFiltra(res)
-    })
-  })
-
-  describe('POST /api/gmail/preview', () => {
-    it('no devuelve el mensaje de la excepcion', async () => {
-      const res = await request(app)
-        .post('/api/gmail/preview')
-        .set(authHeader(admin))
-        .send({ credentials: { refresh_token: 'x' } })
-
-      expect(res.status).toBe(500)
-      noFiltra(res)
-    })
   })
 
   describe('GET /api/gmail/auth-url', () => {
@@ -152,11 +127,12 @@ describe('V21: detalle interno en las respuestas de error', () => {
       config.isProd = false
 
       const res = await request(app)
-        .post('/api/gmail/process')
+        .post('/api/referidos/sync/gmail')
         .set(authHeader(admin))
-        .send({ credentials: { refresh_token: 'x' } })
+        .send({})
 
-      expect(res.body.details).toBeDefined()
+      expect(res.status).toBe(500)
+      expect(res.body.details).toContain('ENOENT')
     })
   })
 })

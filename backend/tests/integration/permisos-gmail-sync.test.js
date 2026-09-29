@@ -34,29 +34,30 @@ async function seedRolExterno(getModel) {
   return rol
 }
 
-// Los 6 endpoints bajo prueba. `statusAutorizado` es el codigo funcional que
+const ROLES_PRIVILEGIADOS = ['RRHH', 'ADMIN', 'JefeRRHH']
+// auth-url queda en RRHH/ADMIN: el callback no valida que la cuenta autorizada
+// sea la casilla de reclutamiento. JefeRRHH se niega a proposito.
+const ROLES_ADMIN_Y_RRHH = ['RRHH', 'ADMIN']
+
+// Los endpoints bajo prueba. `statusAutorizado` es el codigo funcional que
 // devuelve el handler cuando el rol si tiene permiso y Gmail no esta
 // configurado (nunca 401 ni 403).
 const ENDPOINTS = [
   {
-    nombre: 'POST /api/gmail/process',
-    method: 'post',
-    path: '/api/gmail/process',
-    body: {}, // sin credentials -> 400 del handler
-    statusAutorizado: 400,
-  },
-  {
-    nombre: 'POST /api/gmail/preview',
-    method: 'post',
-    path: '/api/gmail/preview',
-    body: {},
-    statusAutorizado: 400,
+    nombre: 'GET /api/gmail/status',
+    method: 'get',
+    path: '/api/gmail/status',
+    statusAutorizado: 200,
+    autorizados: ROLES_PRIVILEGIADOS,
+    denegados: ['TRABAJADOR', 'EXTERNO'],
   },
   {
     nombre: 'GET /api/gmail/auth-url',
     method: 'get',
     path: '/api/gmail/auth-url',
     statusAutorizado: 200,
+    autorizados: ROLES_ADMIN_Y_RRHH,
+    denegados: ['TRABAJADOR', 'EXTERNO', 'JefeRRHH'],
   },
   {
     nombre: 'POST /api/referidos/sync/gmail',
@@ -64,12 +65,16 @@ const ENDPOINTS = [
     path: '/api/referidos/sync/gmail',
     body: {},
     statusAutorizado: 400, // Gmail no configurado
+    autorizados: ROLES_PRIVILEGIADOS,
+    denegados: ['TRABAJADOR', 'EXTERNO'],
   },
   {
     nombre: 'GET /api/referidos/sync/gmail/preview',
     method: 'get',
     path: '/api/referidos/sync/gmail/preview',
     statusAutorizado: 200, // SSE: abre el stream y emite event: error
+    autorizados: ROLES_PRIVILEGIADOS,
+    denegados: ['TRABAJADOR', 'EXTERNO'],
   },
   {
     nombre: 'POST /api/referidos/sync/gmail/manual',
@@ -79,11 +84,10 @@ const ENDPOINTS = [
       referidos: [{ messageId: 'msg-permisos-1', nombre: 'Candidato Prueba' }],
     },
     statusAutorizado: 200,
+    autorizados: ROLES_PRIVILEGIADOS,
+    denegados: ['TRABAJADOR', 'EXTERNO'],
   },
 ]
-
-const ROLES_DENEGADOS = ['TRABAJADOR', 'EXTERNO']
-const ROLES_AUTORIZADOS = ['RRHH', 'ADMIN']
 
 describe('Permisos de endpoints Gmail y sync de referidos', () => {
   let getModel
@@ -118,7 +122,7 @@ describe('Permisos de endpoints Gmail y sync de referidos', () => {
   }
 
   describe.each(ENDPOINTS)('$nombre', (endpoint) => {
-    it.each(ROLES_DENEGADOS)('debe responder 403 para el rol %s', async (rol) => {
+    it.each(endpoint.denegados)('debe responder 403 para el rol %s', async (rol) => {
       const user = await createTestUser(getModel, {
         username: `u-${rol.toLowerCase()}`,
         correo: `${rol.toLowerCase()}@test.com`,
@@ -130,7 +134,7 @@ describe('Permisos de endpoints Gmail y sync de referidos', () => {
       expect(res.status).toBe(403)
     })
 
-    it.each(ROLES_AUTORIZADOS)(
+    it.each(endpoint.autorizados)(
       `debe responder ${endpoint.statusAutorizado} para el rol %s`,
       async (rol) => {
         const user = await createTestUser(getModel, {
@@ -150,6 +154,25 @@ describe('Permisos de endpoints Gmail y sync de referidos', () => {
       const res = endpoint.body === undefined ? await req : await req.send(endpoint.body)
 
       expect(res.status).toBe(401)
+    })
+  })
+
+  // Retiradas: recibian un refresh_token por body y repuntaban el singleton de
+  // gmailService a otra cuenta de Google. El front no las usaba.
+  describe.each([
+    ['post', '/api/gmail/process'],
+    ['post', '/api/gmail/preview'],
+  ])('%s %s (retirada)', (method, path) => {
+    it.each(['RRHH', 'ADMIN', 'JefeRRHH', 'TRABAJADOR', 'EXTERNO'])('debe responder 404 para el rol %s', async (rol) => {
+      const user = await createTestUser(getModel, {
+        username: `u-${rol.toLowerCase()}`,
+        correo: `${rol.toLowerCase()}@test.com`,
+        roles: [rol],
+      })
+
+      const res = await request(app)[method](path).set(authHeader(user)).send({})
+
+      expect(res.status).toBe(404)
     })
   })
 
