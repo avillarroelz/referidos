@@ -346,6 +346,17 @@ async function changeState(req, res) {
       return res.status(400).json({ error: `El estado ${nuevoEstado} solo puede ser asignado por el sistema de reclutamiento externo` })
     }
 
+    // Los estados del ciclo ADC tienen un unico camino legitimo; el cambio manual
+    // los saltaria (dictamen sin dictamen, envio sin ADC).
+    if (nuevoEstado === 'ENVIADO_ADC') {
+      await t.rollback()
+      return res.status(400).json({ error: 'Para enviar a ADC usa Asignar Aprobador' })
+    }
+    if (nuevoEstado === 'VALIDADO_ADC' || nuevoEstado === 'RECHAZADO_ADC') {
+      await t.rollback()
+      return res.status(400).json({ error: `El estado ${nuevoEstado} solo puede fijarse mediante el dictamen del Aprobador asignado` })
+    }
+
     // Solo JefeRRHH (o ADMIN) puede aprobar/rechazar/lista de espera desde EN_REVISION
     const { hasJefeRRHH, hasADMIN: isAdmin } = rolesFromReq(req)
     const JEFE_ONLY_TRANSITIONS = ['APROBADO_JEFE', 'LISTA_ESPERA']
@@ -961,6 +972,12 @@ async function asignarADC(req, res) {
       return res.status(400).json({ error: 'El usuario seleccionado no tiene rol ADC' })
     }
 
+    // La maquina de estados solo permite llegar a ENVIADO_ADC desde APROBADO_JEFE
+    if (ref.estado !== ESTADOS.APROBADO_JEFE) {
+      await t.rollback()
+      return res.status(409).json({ error: `Solo se puede asignar un ADC a un referido en estado APROBADO_JEFE (actual: ${ref.estado})` })
+    }
+
     // Calcular SLA deadline
     const slaDays = config.sla.adcResponseDays
     const slaDeadline = new Date()
@@ -971,18 +988,15 @@ async function asignarADC(req, res) {
     ref.fechaEnvioADC = new Date()
     ref.slaDeadline = slaDeadline
     ref.enviadoADC = true
+    ref.estado = ESTADOS.ENVIADO_ADC
 
-    // Cambiar estado a ENVIADO_ADC si está en EN_REVISION
-    if (ref.estado === ESTADOS.EN_REVISION) {
-      ref.estado = ESTADOS.ENVIADO_ADC
-      await EstadoHistorial.create({
-        referidoId: ref.id,
-        actorUserId: req.auth.id,
-        desde: anterior,
-        hacia: ESTADOS.ENVIADO_ADC,
-        comentario: `Asignado a ADC: ${adcUser.username}`,
-      }, { transaction: t })
-    }
+    await EstadoHistorial.create({
+      referidoId: ref.id,
+      actorUserId: req.auth.id,
+      desde: anterior,
+      hacia: ESTADOS.ENVIADO_ADC,
+      comentario: `Asignado a ADC: ${adcUser.username}`,
+    }, { transaction: t })
 
     await ref.save({ transaction: t })
     await t.commit()

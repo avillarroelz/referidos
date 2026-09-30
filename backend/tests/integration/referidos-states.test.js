@@ -134,11 +134,8 @@ describe('Referidos State Transitions API', () => {
 
       const ref = await crearReferido(rrhhUser)
 
-      // Primero cambiar a EN_REVISION para que la asignacion transite el estado
-      await request(app)
-        .patch(`/api/referidos/${ref.id}/estado`)
-        .set(authHeader(rrhhUser))
-        .send({ nuevoEstado: 'EN_REVISION', comentario: 'Revisando' })
+      // ENVIADO_ADC solo se alcanza desde APROBADO_JEFE (lib/estados.js)
+      await getModel('Referido').update({ estado: 'APROBADO_JEFE' }, { where: { id: ref.id } })
 
       const res = await request(app)
         .patch(`/api/referidos/${ref.id}/asignar-adc`)
@@ -197,14 +194,11 @@ describe('Referidos State Transitions API', () => {
         roles: ['ADC'],
       })
 
-      // Crear referido, cambiar a EN_REVISION, asignar ADC => ENVIADO_ADC
+      // Crear referido, dejarlo en APROBADO_JEFE, asignar ADC => ENVIADO_ADC
       const ref = await crearReferido(rrhhUser)
       refId = ref.id
 
-      await request(app)
-        .patch(`/api/referidos/${refId}/estado`)
-        .set(authHeader(rrhhUser))
-        .send({ nuevoEstado: 'EN_REVISION', comentario: 'Revisando' })
+      await getModel('Referido').update({ estado: 'APROBADO_JEFE' }, { where: { id: refId } })
 
       await request(app)
         .patch(`/api/referidos/${refId}/asignar-adc`)
@@ -245,6 +239,96 @@ describe('Referidos State Transitions API', () => {
       expect(res.status).toBe(403)
       expect(res.body.error).toContain('ADC asignado')
     })
+  })
+
+  // ──────────────────────────────────────────────────────────────
+  // Flujo ADC segun la maquina de estados (lib/estados.js):
+  // ENVIADO_ADC solo desde APROBADO_JEFE; VALIDADO/RECHAZADO_ADC solo por dictamen
+  // ──────────────────────────────────────────────────────────────
+
+  describe('Flujo ADC (APROBADO_JEFE -> ENVIADO_ADC -> dictamen)', () => {
+    let rrhhUser, adcUser
+
+    beforeEach(async () => {
+      rrhhUser = await createTestUser(getModel, {
+        username: 'rrhh_flujo', correo: 'rrhh_flujo@test.com', roles: ['RRHH'],
+      })
+      adcUser = await createTestUser(getModel, {
+        username: 'adc_flujo', correo: 'adc_flujo@test.com', roles: ['ADC'],
+      })
+    })
+
+    async function referidoEn(estado) {
+      const ref = await crearReferido(rrhhUser)
+      await getModel('Referido').update({ estado }, { where: { id: ref.id } })
+      return ref.id
+    }
+
+    it('APROBADO_JEFE + asignar pasa a ENVIADO_ADC (SLA, historial) y el ADC puede dictaminar', async () => {
+      const id = await referidoEn('APROBADO_JEFE')
+
+      const asignar = await request(app)
+        .patch(`/api/referidos/${id}/asignar-adc`)
+        .set(authHeader(rrhhUser))
+        .send({ adcUserId: adcUser.id })
+
+      expect(asignar.status).toBe(200)
+      expect(asignar.body.estado).toBe('ENVIADO_ADC')
+
+      const ref = await getModel('Referido').findByPk(id)
+      expect(ref.estado).toBe('ENVIADO_ADC')
+      expect(ref.fechaEnvioADC).not.toBeNull()
+      expect(ref.slaDeadline).not.toBeNull()
+      const hist = await getModel('EstadoHistorial').findOne({ where: { referidoId: id, hacia: 'ENVIADO_ADC' } })
+      expect(hist.desde).toBe('APROBADO_JEFE')
+
+      const dictamen = await request(app)
+        .patch(`/api/referidos/${id}/dictamen`)
+        .set(authHeader(adcUser))
+        .send({ dictamen: 'CUMPLE' })
+
+      expect(dictamen.status).toBe(200)
+      expect(dictamen.body.estado).toBe('VALIDADO_ADC')
+    })
+
+    it('EN_REVISION + asignar responde 409 y no modifica nada', async () => {
+      const id = await referidoEn('EN_REVISION')
+
+      const res = await request(app)
+        .patch(`/api/referidos/${id}/asignar-adc`)
+        .set(authHeader(rrhhUser))
+        .send({ adcUserId: adcUser.id })
+
+      expect(res.status).toBe(409)
+      expect(res.body.error).toContain('APROBADO_JEFE')
+
+      const ref = await getModel('Referido').findByPk(id)
+      expect(ref.estado).toBe('EN_REVISION')
+      expect(ref.asignadoADCUserId).toBeNull()
+      expect(ref.fechaEnvioADC).toBeNull()
+      expect(ref.slaDeadline).toBeNull()
+      // La creacion ya deja una fila de historial; lo que no debe existir es la de ENVIADO_ADC
+      expect(await getModel('EstadoHistorial').count({ where: { referidoId: id, hacia: 'ENVIADO_ADC' } })).toBe(0)
+    })
+
+    it.each(['VALIDADO_ADC', 'RECHAZADO_ADC', 'ENVIADO_ADC'])(
+      'el cambio manual a %s se rechaza y el estado queda intacto',
+      async (destino) => {
+        // Estado de origen desde el cual la maquina SI permitiria el salto,
+        // para que el rechazo se deba a la regla manual y no a la transicion.
+        const origen = destino === 'ENVIADO_ADC' ? 'APROBADO_JEFE' : 'ENVIADO_ADC'
+        const id = await referidoEn(origen)
+
+        const res = await request(app)
+          .patch(`/api/referidos/${id}/estado`)
+          .set(authHeader(rrhhUser))
+          .send({ nuevoEstado: destino })
+
+        expect(res.status).toBe(400)
+        expect(res.body.error).toMatch(/Asignar Aprobador|dictamen/)
+        expect((await getModel('Referido').findByPk(id)).estado).toBe(origen)
+      },
+    )
   })
 
   // ──────────────────────────────────────────────────────────────
