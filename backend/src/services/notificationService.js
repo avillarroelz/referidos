@@ -48,13 +48,19 @@ async function notificarCambioEstado(referido, desde, hacia, actorUserId) {
 }
 
 /**
- * Notifica nuevo comentario a involucrados (excepto al autor).
+ * Notifica nuevo comentario solo a quienes pueden leerlo (decisión 30-09):
+ * ADC asignado y creador únicamente si tiene rol de gestión. Nunca al autor.
  */
 async function notificarComentario(referido, autorUserId, autorNombre) {
   const destinatarios = new Set()
 
   if (referido.creadoPorUserId && referido.creadoPorUserId !== autorUserId) {
-    destinatarios.add(referido.creadoPorUserId)
+    const creador = await getModel('Usuario').findByPk(referido.creadoPorUserId, {
+      include: [{ model: getModel('Rol'), as: 'roles' }],
+    })
+    if (creador?.roles?.some(r => ['RRHH', 'JefeRRHH', 'ADMIN'].includes(r.nombre))) {
+      destinatarios.add(referido.creadoPorUserId)
+    }
   }
   if (referido.asignadoADCUserId && referido.asignadoADCUserId !== autorUserId) {
     destinatarios.add(referido.asignadoADCUserId)

@@ -3,6 +3,7 @@
 const mockCreate = jest.fn().mockResolvedValue({ id: 1 })
 const mockFindOne = jest.fn().mockResolvedValue(null)
 const mockGetUsuarios = jest.fn().mockResolvedValue([])
+const mockUsuarioFindByPk = jest.fn()
 
 jest.mock('../../../src/db', () => ({
   getModel: jest.fn((name) => {
@@ -10,7 +11,7 @@ jest.mock('../../../src/db', () => ({
     if (name === 'Rol') return {
       findOne: jest.fn().mockResolvedValue({ getUsuarios: mockGetUsuarios }),
     }
-    if (name === 'Usuario') return {}
+    if (name === 'Usuario') return { findByPk: mockUsuarioFindByPk }
     return {}
   }),
 }))
@@ -107,24 +108,48 @@ describe('NotificationService', () => {
   })
 
   describe('notificarComentario', () => {
-    it('debe notificar al creador del referido', async () => {
+    it('notifica al ADC asignado y NO al creador TRABAJADOR', async () => {
+      mockUsuarioFindByPk.mockResolvedValue({ id: 2, roles: [{ nombre: 'TRABAJADOR' }] })
       const referido = {
         id: 1,
         nombre: 'Juan',
         creadoPorUserId: 2,
-        asignadoADCUserId: null,
+        asignadoADCUserId: 3,
       }
 
       await notificarComentario(referido, 99, 'Admin')
 
+      expect(mockCreate).toHaveBeenCalledTimes(1)
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          destinatarioUserId: 2,
+          destinatarioUserId: 3,
           tipo: 'comentario',
           titulo: 'Nuevo Comentario',
           mensaje: 'Admin comentó en Juan',
+          referidoId: 1,
         })
       )
+    })
+
+    it('notifica al creador si además tiene rol de gestión (RRHH)', async () => {
+      mockUsuarioFindByPk.mockResolvedValue({ id: 2, roles: [{ nombre: 'RRHH' }] })
+      const referido = { id: 1, nombre: 'Juan', creadoPorUserId: 2, asignadoADCUserId: null }
+
+      await notificarComentario(referido, 99, 'Admin')
+
+      expect(mockCreate).toHaveBeenCalledTimes(1)
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ destinatarioUserId: 2 })
+      )
+    })
+
+    it('notifica al creador si es además el ADC asignado, sin duplicar', async () => {
+      mockUsuarioFindByPk.mockResolvedValue({ id: 2, roles: [{ nombre: 'ADC' }] })
+      const referido = { id: 1, nombre: 'Juan', creadoPorUserId: 2, asignadoADCUserId: 2 }
+
+      await notificarComentario(referido, 99, 'Admin')
+
+      expect(mockCreate).toHaveBeenCalledTimes(1)
     })
 
     it('no debe notificar al autor del comentario', async () => {
@@ -136,6 +161,22 @@ describe('NotificationService', () => {
       }
 
       await notificarComentario(referido, 5, 'Autor')
+      expect(mockCreate).not.toHaveBeenCalled()
+    })
+
+    it('el autor nunca se notifica a sí mismo (ADC asignado que comenta)', async () => {
+      mockUsuarioFindByPk.mockResolvedValue({ id: 2, roles: [{ nombre: 'TRABAJADOR' }] })
+      const referido = { id: 1, nombre: 'Juan', creadoPorUserId: 2, asignadoADCUserId: 3 }
+
+      await notificarComentario(referido, 3, 'ADC')
+      expect(mockCreate).not.toHaveBeenCalled()
+    })
+
+    it('el autor RRHH creador no se notifica a sí mismo', async () => {
+      mockUsuarioFindByPk.mockResolvedValue({ id: 2, roles: [{ nombre: 'RRHH' }] })
+      const referido = { id: 1, nombre: 'Juan', creadoPorUserId: 2, asignadoADCUserId: null }
+
+      await notificarComentario(referido, 2, 'RRHH')
       expect(mockCreate).not.toHaveBeenCalled()
     })
   })

@@ -144,7 +144,8 @@ describe('Control de acceso a comentarios de un referido (IDOR)', () => {
       expect(res.status).toBe(403)
     })
 
-    it('debe permitir al dueño del referido', async () => {
+    // Decision 30-09: el creador TRABAJADOR ya no comenta (antes 201)
+    it('debe rechazar con 403 al dueño TRABAJADOR del referido', async () => {
       const { dueno, referido } = await montarEscenario()
 
       const res = await request(app)
@@ -152,7 +153,7 @@ describe('Control de acceso a comentarios de un referido (IDOR)', () => {
         .set(authHeader(dueno))
         .send({ mensaje: 'Comentario del dueño del referido' })
 
-      expect(res.status).toBe(201)
+      expect(res.status).toBe(403)
     })
 
     it('debe permitir al ADC asignado', async () => {
@@ -203,16 +204,99 @@ describe('Control de acceso a comentarios de un referido (IDOR)', () => {
       expect(res.status).toBe(403)
     })
 
-    it('debe permitir al dueño, al ADC asignado y a RRHH', async () => {
-      const { dueno, adc, rrhh, referido } = await montarEscenario()
+    // Decision 30-09: el dueño TRABAJADOR ya no lee (antes 200)
+    it('debe permitir al ADC asignado y a RRHH', async () => {
+      const { adc, rrhh, referido } = await montarEscenario()
 
-      for (const user of [dueno, adc, rrhh]) {
+      for (const user of [adc, rrhh]) {
         const res = await request(app)
           .get(`/api/referidos/${referido.id}/comentarios`)
           .set(authHeader(user))
 
         expect(res.status).toBe(200)
       }
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // Decision 30-09: comentarios solo para RRHH, JefeRRHH, ADC asignado y ADMIN
+  // ────────────────────────────────────────────────────────────────
+
+  describe('decision 30-09: solo RRHH, JefeRRHH, ADMIN y ADC asignado', () => {
+    it('JefeRRHH ve un comentario escrito por RRHH con la visibilidad por defecto', async () => {
+      const { rrhh, referido } = await montarEscenario()
+      const jefe = await createTestUser(getModel, {
+        username: 'jefe', correo: 'jefe@test.com', roles: ['JefeRRHH'],
+      })
+
+      // Guardado con el default historico 'RRHH,ADC,ADMIN' (sin JefeRRHH)
+      await getModel('Comentario').create({
+        referidoId: referido.id,
+        autorUserId: rrhh.id,
+        mensaje: 'Observacion de RRHH',
+        visibleParaRoles: 'RRHH,ADC,ADMIN',
+      })
+
+      const res = await request(app)
+        .get(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(jefe))
+
+      expect(res.status).toBe(200)
+      expect(res.body.map(c => c.mensaje)).toEqual(['Observacion de RRHH'])
+    })
+
+    it('TRABAJADOR creador del referido recibe 403 en GET y POST', async () => {
+      const { dueno, referido } = await montarEscenario()
+
+      const get = await request(app)
+        .get(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(dueno))
+      const post = await request(app)
+        .post(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(dueno))
+        .send({ mensaje: 'El creador no comenta' })
+
+      expect(get.status).toBe(403)
+      expect(post.status).toBe(403)
+      expect(await getModel('Comentario').count({ where: { referidoId: referido.id } })).toBe(0)
+    })
+
+    it('EXTERNO postulante del referido recibe 403 en GET y POST', async () => {
+      const { externo, referido } = await montarEscenario()
+      await referido.update({ postulanteUserId: externo.id })
+
+      const get = await request(app)
+        .get(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(externo))
+      const post = await request(app)
+        .post(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(externo))
+        .send({ mensaje: 'El postulante no comenta' })
+
+      expect(get.status).toBe(403)
+      expect(post.status).toBe(403)
+    })
+
+    it('ADC no asignado recibe 403 en GET y POST; el asignado recibe 200', async () => {
+      const { adc, referido } = await montarEscenario()
+      const otroAdc = await createTestUser(getModel, {
+        username: 'adc2', correo: 'adc2@test.com', roles: ['ADC'],
+      })
+
+      const getOtro = await request(app)
+        .get(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(otroAdc))
+      const postOtro = await request(app)
+        .post(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(otroAdc))
+        .send({ mensaje: 'ADC ajeno' })
+      const getAsignado = await request(app)
+        .get(`/api/referidos/${referido.id}/comentarios`)
+        .set(authHeader(adc))
+
+      expect(getOtro.status).toBe(403)
+      expect(postOtro.status).toBe(403)
+      expect(getAsignado.status).toBe(200)
     })
   })
 

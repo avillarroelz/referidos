@@ -2,7 +2,7 @@
 const { body, validationResult } = require('express-validator')
 const { getModel } = require('../db')
 const { notificarComentario } = require('../services/notificationService')
-const { assertReferidoAccess } = require('../lib/acceso')
+const { relacionesConReferido } = require('../lib/acceso')
 
 const Comentario = () => getModel('Comentario')
 const Referido = () => getModel('Referido')
@@ -14,6 +14,16 @@ const Usuario = () => getModel('Usuario')
 // Roles que pueden figurar en visibleParaRoles. Sin esta lista el cliente elige
 // cualquier valor y puede dirigir un comentario a un rol inventado o inesperado.
 const ROLES_VISIBILIDAD = ['TRABAJADOR', 'RRHH', 'JefeRRHH', 'ADMIN', 'ADC', 'EXTERNO']
+
+// La ruta ya limita el ROL (RRHH, JefeRRHH, ADMIN, ADC); aca se comprueba la
+// RELACION: privilegiado, o ADC pero solo el asignado a este referido. No se usa
+// puedeAccederReferido porque dejaria pasar a un ADC por ser creador del referido.
+function assertAccesoComentarios(req, res, referido) {
+  const rel = relacionesConReferido(req.auth, referido)
+  if (rel.privilegiado || rel.adcAsignado) return true
+  res.status(403).json({ error: 'Sin permisos para ver o escribir comentarios de este referido' })
+  return false
+}
 
 const crearValidators = [
   body('mensaje').isString().notEmpty().withMessage('mensaje es obligatorio'),
@@ -36,7 +46,9 @@ async function listar(req, res) {
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
   const referidoId = Number(req.params.id)
-  const userRoles = req.auth.roles || []
+  // JefeRRHH ve lo dirigido a RRHH: los comentarios existentes se guardaron con
+  // 'RRHH,ADC,ADMIN' y asi se evita migrar filas.
+  const userRoles = (req.auth.roles || []).flatMap(r => (r === 'JefeRRHH' ? ['JefeRRHH', 'RRHH'] : [r]))
 
   try {
     // El filtro por visibleParaRoles es visibilidad por ROL, no control de
@@ -44,7 +56,7 @@ async function listar(req, res) {
     // expediente cuya lista incluya su rol.
     const referido = await Referido().findByPk(referidoId)
     if (!referido) return res.status(404).json({ error: 'Referido no encontrado' })
-    if (!assertReferidoAccess(req, res, referido)) return
+    if (!assertAccesoComentarios(req, res, referido)) return
 
     const comentarios = await Comentario().findAll({
       where: { referidoId },
@@ -85,7 +97,7 @@ async function crear(req, res) {
     if (!referido) {
       return res.status(404).json({ error: 'Referido no encontrado' })
     }
-    if (!assertReferidoAccess(req, res, referido)) return
+    if (!assertAccesoComentarios(req, res, referido)) return
 
     const comentario = await Comentario().create({
       referidoId,

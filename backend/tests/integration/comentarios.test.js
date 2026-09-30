@@ -147,24 +147,24 @@ describe('Comentarios API', () => {
   // ──────────────────────────────────────────────────────────────
 
   describe('Visibilidad de comentarios por roles', () => {
-    it('TRABAJADOR no ve comentarios marcados solo para RRHH', async () => {
+    it('el ADC asignado no ve comentarios marcados solo para RRHH', async () => {
       const rrhhUser = await createTestUser(getModel, {
         username: 'rrhh_vis',
         correo: 'rrhh_vis@test.com',
         roles: ['RRHH'],
       })
 
-      const workerUser = await createTestUser(getModel, {
-        username: 'worker_vis',
-        correo: 'worker_vis@test.com',
-        roles: ['TRABAJADOR'],
+      const adcUser = await createTestUser(getModel, {
+        username: 'adc_vis',
+        correo: 'adc_vis@test.com',
+        roles: ['ADC'],
       })
 
-      // El creador tiene que ser el TRABAJADOR: lo que se prueba aca es el
-      // filtrado por visibleParaRoles, y para llegar a el hay que tener acceso
-      // al referido. Con rrhhUser como creador el trabajador seria un ajeno y
-      // recibiria 403 (ver comentarios-acceso.test.js), sin llegar a filtrar nada.
-      const ref = await crearReferidoDirecto(workerUser.id)
+      // El ADC tiene que ser el asignado: lo que se prueba aca es el filtrado
+      // por visibleParaRoles, y para llegar a el hay que tener acceso al
+      // referido (ver comentarios-acceso.test.js).
+      const ref = await crearReferidoDirecto(rrhhUser.id)
+      await ref.update({ asignadoADCUserId: adcUser.id })
 
       // Comentario solo para RRHH
       const Comentario = getModel('Comentario')
@@ -175,12 +175,12 @@ describe('Comentarios API', () => {
         visibleParaRoles: 'RRHH,ADMIN',
       })
 
-      // Comentario visible para todos incluyendo TRABAJADOR
+      // Comentario visible tambien para ADC
       await Comentario.create({
         referidoId: ref.id,
         autorUserId: rrhhUser.id,
         mensaje: 'Para todos',
-        visibleParaRoles: 'RRHH,ADMIN,TRABAJADOR',
+        visibleParaRoles: 'RRHH,ADMIN,ADC',
       })
 
       // RRHH ve ambos
@@ -191,14 +191,14 @@ describe('Comentarios API', () => {
       expect(resRrhh.status).toBe(200)
       expect(resRrhh.body).toHaveLength(2)
 
-      // TRABAJADOR solo ve el que incluye su rol
-      const resWorker = await request(app)
+      // El ADC solo ve el que incluye su rol
+      const resAdc = await request(app)
         .get(`/api/referidos/${ref.id}/comentarios`)
-        .set(authHeader(workerUser))
+        .set(authHeader(adcUser))
 
-      expect(resWorker.status).toBe(200)
-      expect(resWorker.body).toHaveLength(1)
-      expect(resWorker.body[0].mensaje).toBe('Para todos')
+      expect(resAdc.status).toBe(200)
+      expect(resAdc.body).toHaveLength(1)
+      expect(resAdc.body[0].mensaje).toBe('Para todos')
     })
   })
 })
