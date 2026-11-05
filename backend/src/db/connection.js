@@ -2,6 +2,7 @@
 const { Sequelize } = require('sequelize')
 const fs = require('fs')
 const { config } = require('../config')
+const { getDbPassword, withAuthRetry } = require('./dbPassword')
 
 /**
  * Logging por .env:
@@ -52,8 +53,19 @@ const sequelize = new Sequelize(
       min: 0,
       idle: 10000,
       acquire: 30000
+    },
+    hooks: {
+      // Cada conexión nueva del pool toma la clave vigente (cacheada); sin DB_SECRET_ARN es DB_PASS
+      beforeConnect: async (cfg) => {
+        cfg.password = await getDbPassword()
+      }
     }
   }
 )
+
+// Si la base rechaza la clave (28P01, p. ej. tras una rotación) se invalida el caché y se
+// reintenta una vez. Aquí pasan todas las conexiones, incluido authenticate() del arranque.
+const cm = sequelize.connectionManager
+cm.connect = withAuthRetry(cm.connect.bind(cm))
 
 module.exports = { sequelize }

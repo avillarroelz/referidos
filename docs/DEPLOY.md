@@ -212,6 +212,32 @@ inesperado— se restaura el snapshot del paso 1.
 
 ---
 
+## Clave de la base (Secrets Manager)
+
+La clave de RDS rota cada 7 días en Secrets Manager (JSON `{"username","password"}`).
+Para que la app la siga sin reinicios, en `backend.env` se define:
+
+```
+DB_SECRET_ARN=arn:aws:secretsmanager:sa-east-1:<cuenta>:secret:<nombre>
+# opcionales: AWS_REGION (por defecto sa-east-1), DB_SECRET_TTL_MS (por defecto 3600000)
+```
+
+- Con `DB_SECRET_ARN`, la clave sale del secreto (cacheada en memoria; se relee si
+  vence el TTL o si la base responde `28P01`, autenticación fallida). `DB_PASS` se
+  ignora: queda solo como respaldo/desarrollo.
+- Solo se usa el campo `password` del secreto (rotación de usuario único; la estrategia de usuarios alternados no está soportada).
+- `src/scripts/migrate.js` usa la misma fuente.
+- Quien lee el secreto necesita `secretsmanager:GetSecretValue` sobre ese ARN (y
+  `kms:Decrypt` si usa una CMK propia). Ojo: como `backend.env` trae
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (usuario `fileeco`), el SDK usa esas
+  credenciales y **no** el rol de instancia `referidos-app-ec2`. Ambos tienen el
+  permiso; si se rotan o retiran las claves de `fileeco`, el contenedor deja de leer
+  el secreto (y sigue con la última clave en memoria hasta el siguiente 28P01).
+- Si Secrets Manager no responde, la app sigue con la última clave leída y lo
+  registra con `console.warn`; solo falla si nunca pudo leerla.
+
+---
+
 ## Qué entra en este despliegue
 
 | Cambio | Efecto visible |

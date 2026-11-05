@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const { Pool } = require('pg')
 require('dotenv').config()
+const { getDbPassword } = require('../db/dbPassword')
 
 const file = process.argv[2]
 if (!file) {
@@ -12,19 +13,22 @@ if (!file) {
   process.exit(1)
 }
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  ssl: process.env.DB_SSL === 'true' ? {
-    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
-  } : false
-})
+let pool
 
 async function run() {
   try {
+    // Misma fuente de clave que la app (Secrets Manager si hay DB_SECRET_ARN, si no DB_PASS)
+    pool = new Pool({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      user: process.env.DB_USER,
+      password: await getDbPassword(),
+      database: process.env.DB_NAME,
+      ssl: process.env.DB_SSL === 'true' ? {
+        rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
+      } : false
+    })
+
     const sqlPath = path.isAbsolute(file)
       ? file
       : path.join(__dirname, '..', '..', 'migrations', file)
@@ -44,7 +48,7 @@ async function run() {
     process.exit(0)
   } catch (error) {
     console.error('❌ Error ejecutando migración:', error.message)
-    await pool.end()
+    if (pool) await pool.end()
     process.exit(1)
   }
 }

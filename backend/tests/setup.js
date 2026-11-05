@@ -26,6 +26,9 @@ jest.mock('../src/config', () => ({
       ssl: false,
       sslRejectUnauthorized: true,
       sslCaPath: null,
+      secretArn: undefined,
+      secretRegion: 'sa-east-1',
+      secretTtlMs: 60 * 60 * 1000,
     },
     jwt: {
       secret: 'test-secret',

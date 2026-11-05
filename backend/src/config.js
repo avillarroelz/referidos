@@ -17,7 +17,11 @@ const config = {
     name: process.env.DB_NAME,
     ssl: process.env.DB_SSL === 'true',
     sslRejectUnauthorized: isProd ? true : process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
-    sslCaPath: process.env.DB_SSL_CA
+    sslCaPath: process.env.DB_SSL_CA,
+    // Si hay DB_SECRET_ARN la clave sale de Secrets Manager (rota cada 7 días) y DB_PASS se ignora
+    secretArn: process.env.DB_SECRET_ARN,
+    secretRegion: process.env.AWS_REGION || 'sa-east-1',
+    secretTtlMs: parseInt(process.env.DB_SECRET_TTL_MS) || 60 * 60 * 1000
   },
 
   // JWT — en producción DEBEN configurarse secrets fuertes y diferentes
