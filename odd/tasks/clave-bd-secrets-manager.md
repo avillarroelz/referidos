@@ -27,9 +27,9 @@ Próxima rotación: **2026-11-11 20:59 -03**.
 - [x] Suite completa en verde: 44 suites, 924 pasan, 3 skip (05-11)
 - [x] Revisor: sin bloqueantes. Corregidos con TDD: `used` capturado antes de conectar (cfg compartido), respaldo con la clave anterior si Secrets Manager cae, la ventana antirebote solo se consume con lectura real
 - [x] Lectura del secreto desde el contenedor de prod con credenciales de `fileeco`: OK (incluye KMS)
-- [ ] Commit
-- [ ] Deploy: imagen nueva + `DB_SECRET_ARN` en `backend.env`
-- [ ] Aceptación en prod: `aws secretsmanager rotate-secret` forzado y la app sigue respondiendo sin reinicio
+- [x] Commit `74ad80d`
+- [x] Deploy 05-11 14:19: backend `74ad80d`, frontend retag del mismo digest de `1350e6f`, `DB_SECRET_ARN` en `backend.env`. Snapshot `referidos-pre-deploy-20261105-1413`
+- [x] Aceptación: rotación forzada 14:21; `DB_PASS` quedó vieja y los logins consultan la base sin reinicio, 0 × 28P01 después. Un solo fallo a las 14:20:42, dentro de la ventana en que RDS cambia la clave antes de publicarla (esperable)
 
 ## Criterios de aceptación
 1. Jest completo en verde.
@@ -41,4 +41,4 @@ Próxima rotación: **2026-11-11 20:59 -03**.
 - Permisos: rol `referidos-app-ec2` y usuario `fileeco` (sus credenciales están en el contenedor y el SDK las toma primero) tienen `GetSecretValue` sobre el ARN.
 
 ## Progreso / siguiente paso
-05-11: código, tests (18 de dbPassword/cableado) y revisor listos. Siguiente: suite completa → commit → deploy (con confirmación) → rotación forzada.
+05-11: CERRADO. Rollback: `TAG=1350e6f` en `/opt/referidos/.env` + `backend.env.bak-pre-74ad80d` (con la clave vigente en DB_PASS, que hoy quedó vieja: releerla del secreto).
