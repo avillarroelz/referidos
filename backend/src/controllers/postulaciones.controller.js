@@ -39,6 +39,7 @@ const crearValidators = [
 async function crear(req, res) {
   // Con uploader.fields(), multer entrega los archivos en req.files (objeto por campo)
   const cvFile = req.files?.cv?.[0] || null
+  const certFiles = req.files?.certificados || []
   const docFiles = req.files?.documentos || []
 
   const errors = validationResult(req)
@@ -55,6 +56,16 @@ async function crear(req, res) {
   if (cvFile.mimetype !== 'application/pdf') {
     cleanupTempFiles(req)
     return res.status(400).json({ errors: [{ msg: 'El CV debe ser un archivo PDF', param: 'cv' }] })
+  }
+
+  // Certificados de estudio: al menos uno (4° medio), hasta 3 (lo acota multer), solo PDF
+  if (certFiles.length === 0) {
+    cleanupTempFiles(req)
+    return res.status(400).json({ errors: [{ msg: 'Debes adjuntar al menos un certificado de estudio en PDF', param: 'certificados' }] })
+  }
+  if (certFiles.some(f => f.mimetype !== 'application/pdf')) {
+    cleanupTempFiles(req)
+    return res.status(400).json({ errors: [{ msg: 'Los certificados de estudio deben ser archivos PDF', param: 'certificados' }] })
   }
 
   // Documentos adicionales: opcionales, pero solo se aceptan PDF
@@ -168,6 +179,9 @@ async function crear(req, res) {
     // Subir CV (obligatorio) + documentos adicionales (opcionales) como adjuntos.
     // S3 si está configurado; si falla, fallback local. Cada archivo => un Documento.
     await guardarDocumento(cvFile, ref, req.body.rut, 'cv', t)
+    for (const cert of certFiles) {
+      await guardarDocumento(cert, ref, req.body.rut, 'certificado', t, PREFIJO_CERTIFICADO)
+    }
     for (const doc of docFiles) {
       await guardarDocumento(doc, ref, req.body.rut, 'documento', t)
     }
@@ -223,9 +237,21 @@ async function listarMias(req, res) {
   }
 }
 
+// Sin columna de tipo en documentos: RRHH reconoce los certificados por este prefijo del nombre
+const PREFIJO_CERTIFICADO = 'Certificado de estudio - '
+const MAX_NOMBRE = 200 // largo de documentos.nombre
+
+// Antepone el prefijo y recorta por el medio para no perder la extensión
+function nombreConPrefijo(prefijo, original) {
+  const nombre = prefijo + original
+  if (nombre.length <= MAX_NOMBRE) return nombre
+  const ext = path.extname(original).slice(0, 10)
+  return nombre.slice(0, MAX_NOMBRE - ext.length) + ext
+}
+
 // Guarda un archivo como Documento ligado al referido.
 // Sube a S3 si está configurado; si falla, deja la ruta local como fallback.
-async function guardarDocumento(file, ref, rut, tipo, t) {
+async function guardarDocumento(file, ref, rut, tipo, t, prefijoNombre = '') {
   let rutaFinal = path.relative(process.cwd(), file.path).replace(/\\/g, '/')
   let s3Key = null
   if (useS3) {
@@ -250,7 +276,7 @@ async function guardarDocumento(file, ref, rut, tipo, t) {
   }
 
   await Documento().create({
-    nombre: file.originalname,
+    nombre: prefijoNombre ? nombreConPrefijo(prefijoNombre, file.originalname) : file.originalname,
     ruta: rutaFinal,
     s3Key,
     mimetype: file.mimetype,

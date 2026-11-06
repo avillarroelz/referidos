@@ -31,12 +31,19 @@ const CAMPOS_BASE = {
 }
 
 const DIR_SUBIDAS = path.join(process.cwd(), 'uploads', 'postulaciones')
+const archivosEnSubidas = () => (fs.existsSync(DIR_SUBIDAS) ? fs.readdirSync(DIR_SUBIDAS).length : 0)
 
-/** Postula con el RUT indicado (unico por caso: el controller bloquea duplicados). */
-function postular(rut) {
+/** Postula con el RUT indicado, sin certificado de estudio (unico por caso: el controller bloquea duplicados). */
+function postularSinCertificado(rut) {
   return request(app)
     .post('/api/public/postulaciones')
     .field({ ...CAMPOS_BASE, rut })
+}
+
+/** Postula con el RUT indicado y un certificado de estudio (obligatorio desde 06-11-2026). */
+function postular(rut) {
+  return postularSinCertificado(rut)
+    .attach('certificados', PDF, { filename: 'cuarto-medio.pdf', contentType: 'application/pdf' })
 }
 
 describe('Contrato de subida de POST /api/public/postulaciones', () => {
@@ -74,8 +81,8 @@ describe('Contrato de subida de POST /api/public/postulaciones', () => {
     expect(res.body.id).toBeDefined()
 
     const docs = await getModel('Documento').findAll()
-    expect(docs).toHaveLength(1)
-    expect(docs[0].mimetype).toBe('application/pdf')
+    expect(docs).toHaveLength(2) // CV + certificado
+    expect(docs.every(d => d.mimetype === 'application/pdf')).toBe(true)
   })
 
   it('acepta el CV junto con documentos adicionales', async () => {
@@ -87,7 +94,77 @@ describe('Contrato de subida de POST /api/public/postulaciones', () => {
     expect(res.status).toBe(201)
 
     const docs = await getModel('Documento').findAll()
-    expect(docs).toHaveLength(3)
+    expect(docs).toHaveLength(4) // CV + certificado + 2 adicionales
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // Certificados de estudio (obligatorio al menos 1, máx 3, solo PDF)
+  // ────────────────────────────────────────────────────────────────
+
+  it('guarda los certificados con prefijo para que RRHH los distinga (201)', async () => {
+    const res = await postularSinCertificado('17111111-1')
+      .attach('cv', PDF, { filename: 'curriculum.pdf', contentType: 'application/pdf' })
+      .attach('certificados', PDF, { filename: 'cuarto-medio.pdf', contentType: 'application/pdf' })
+      .attach('certificados', PDF, { filename: 'titulo.pdf', contentType: 'application/pdf' })
+      .attach('documentos', PDF, { filename: 'curso.pdf', contentType: 'application/pdf' })
+
+    expect(res.status).toBe(201)
+    const nombres = (await getModel('Documento').findAll()).map(d => d.nombre).sort()
+    expect(nombres).toEqual([
+      'Certificado de estudio - cuarto-medio.pdf',
+      'Certificado de estudio - titulo.pdf',
+      'curriculum.pdf',
+      'curso.pdf',
+    ])
+  })
+
+  it('rechaza la postulacion sin certificado de estudio (400)', async () => {
+    const antes = archivosEnSubidas()
+    const res = await postularSinCertificado('17222222-2')
+      .attach('cv', PDF, { filename: 'curriculum.pdf', contentType: 'application/pdf' })
+
+    expect(res.status).toBe(400)
+    expect(JSON.stringify(res.body)).toContain('certificado de estudio')
+    expect(await getModel('Referido').count()).toBe(0)
+    expect(archivosEnSubidas()).toBe(antes)
+  })
+
+  it('rechaza un certificado que no sea PDF (400)', async () => {
+    const antes = archivosEnSubidas()
+    const res = await postularSinCertificado('17333333-3')
+      .attach('cv', PDF, { filename: 'curriculum.pdf', contentType: 'application/pdf' })
+      .attach('certificados', PDF, { filename: 'foto.png', contentType: 'image/png' })
+
+    expect(res.status).toBe(400)
+    expect(JSON.stringify(res.body)).toContain('certificados de estudio deben ser archivos PDF')
+    expect(await getModel('Referido').count()).toBe(0)
+    expect(archivosEnSubidas()).toBe(antes)
+  })
+
+  it('rechaza mas de 3 certificados (400)', async () => {
+    const antes = archivosEnSubidas()
+    let req = postularSinCertificado('17444444-4')
+      .attach('cv', PDF, { filename: 'curriculum.pdf', contentType: 'application/pdf' })
+    for (const n of [1, 2, 3, 4]) {
+      req = req.attach('certificados', PDF, { filename: `cert${n}.pdf`, contentType: 'application/pdf' })
+    }
+    const res = await req
+
+    expect(res.status).toBe(400)
+    expect(await getModel('Referido').count()).toBe(0)
+    expect(archivosEnSubidas()).toBe(antes)
+  })
+
+  it('recorta el nombre con prefijo al largo de la columna (200)', async () => {
+    const largo = 'a'.repeat(190) + '.pdf'
+    const res = await postularSinCertificado('17555555-5')
+      .attach('cv', PDF, { filename: 'curriculum.pdf', contentType: 'application/pdf' })
+      .attach('certificados', PDF, { filename: largo, contentType: 'application/pdf' })
+
+    expect(res.status).toBe(201)
+    const cert = (await getModel('Documento').findAll()).find(d => d.nombre.startsWith('Certificado'))
+    expect(cert.nombre.length).toBeLessThanOrEqual(200)
+    expect(cert.nombre.endsWith('.pdf')).toBe(true)
   })
 
   // ────────────────────────────────────────────────────────────────

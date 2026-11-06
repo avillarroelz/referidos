@@ -10,11 +10,12 @@ router.post('/referidos', publicFormLimiter, referidosCtrl.crearPublicoValidator
 
 // POST /api/public/postulaciones — postular sin sesión (con CV en PDF)
 // Mismo controlador que el endpoint autenticado: detecta si hay req.auth o no.
-// Campos de archivo: 'cv' (PDF obligatorio) y 'documentos' (hasta 20 PDF opcionales)
+// Campos de archivo: 'cv' (PDF obligatorio), 'certificados' (1 a 3 PDF obligatorios) y 'documentos' (hasta 20 PDF opcionales)
 router.post('/postulaciones',
   publicFormLimiter,
   uploader('postulaciones').fields([
     { name: 'cv', maxCount: 1 },
+    { name: 'certificados', maxCount: 3 },
     { name: 'documentos', maxCount: 20 },
   ]),
   postulacionesCtrl.crearValidators,

@@ -78,10 +78,11 @@ describe('el fallo de S3 no deja la fila mintiendo ni pasa en silencio', () => {
         telefono: '+56911111111', cargoPostulado: 'Analista', rut: '11111111-1',
       })
       .attach('cv', PDF, 'cv.pdf')
+      .attach('certificados', PDF, 'cuarto-medio.pdf') // obligatorio desde 06-11-2026
 
     expect([200, 201]).toContain(res.status)
 
-    const doc = await getModel('Documento').findOne({ order: [['id', 'DESC']] })
+    const doc = await getModel('Documento').findOne({ where: { nombre: 'cv.pdf' } })
     expect(doc).not.toBeNull()
     expect(doc.s3Key).toBeNull()
     expect(doc.ruta.startsWith('uploads/')).toBe(true)
