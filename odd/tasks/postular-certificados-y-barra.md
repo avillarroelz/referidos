@@ -26,12 +26,12 @@ Frontend (submódulo):
 - [x] F2 Sección certificados: obligatoria, máx 3, PDF, se envía como `certificados` (5 tests)
 - [x] Suites completas: back 44 suites / 929 ok / 3 skip; front 42 archivos / 671 ok (06-11)
 - [x] Revisor: sin bloqueantes. Corregido: /Postular en mayúsculas (TDD), temporales verificados en rechazos. Decisión Alejandro: quitar TODAS las salidas del formulario (enlaces a Mis postulaciones / Mi cuenta y "No, terminar"; éxito solo ofrece "Sí, hacer otra"). Deuda en `_propuesta.md` §8
-- [ ] Commits (front + puntero en raíz) y push
-- [ ] Deploy + verificación en https://referidos.ecoraapp.com/postular
+- [x] Commits front `9288df1` + raíz `2872c1d`, push
+- [x] Deploy 06-11 09:45 (`2872c1d`, snapshot `referidos-pre-deploy-20261106-0940`). Verificado: bundle publicado trae la sección de certificados y no trae "No, terminar"; POST público sin certificado → 400 "Debes adjuntar al menos un certificado de estudio en PDF". Rollback: `TAG=74ad80d` (`.env.bak-pre-2872c1d`)
 
 ## Criterios de aceptación
 1. Jest y Vitest completos en verde.
 2. En prod, /postular muestra solo el logo; enviar sin certificado se bloquea; con 1–3 PDF se crea y RRHH ve "Certificado de estudio - …".
 
 ## Progreso / siguiente paso
-06-11: suites back 929 ok/3 skip, front 676 ok; lint y build OK. Commit front `9288df1`. Siguiente: commits → deploy (back y front juntos: el front nuevo manda `certificados`, que el back viejo rechaza).
+06-11: CERRADO salvo prueba visual y envío real con certificados (lo hace Alejandro o RRHH).
