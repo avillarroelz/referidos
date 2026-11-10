@@ -29,9 +29,9 @@ router.get('/status', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), getGmailStatus)
 /**
  * GET /api/gmail/auth-url
  * Obtener URL de autorización OAuth2
- * Requiere rol: ADMIN o RRHH
+ * Requiere rol: ADMIN, RRHH o JefeRRHH
  */
-// Sin JefeRRHH a proposito: el callback no valida que la cuenta autorizada sea la casilla de reclutamiento.
-router.get('/auth-url', requireRoles('RRHH', 'ADMIN'), getAuthUrl)
+// Los tres roles pueden conectar: el callback solo acepta la casilla de reclutamiento.
+router.get('/auth-url', requireRoles('RRHH', 'ADMIN', 'JefeRRHH'), getAuthUrl)
 
 module.exports = router

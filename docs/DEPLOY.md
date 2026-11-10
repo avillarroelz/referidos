@@ -191,8 +191,12 @@ casilla desde el panel, en **el mismo navegador**, y sin dejar pasar más de die
 minutos entre iniciar y autorizar. Si se completa en otro navegador o se demora
 más, va a fallar: es intencional.
 
-Los dos rechazos posibles ya tienen mensaje propio en la UI (`invalid_state`,
-`forbidden`).
+Solo se acepta la casilla `reclutamiento@ecora.cl` (`GMAIL_SYNC_EMAIL`): hay que
+autorizar con la sesión de Google de esa casilla. Pueden conectarla ADMIN,
+JefeRRHH y RRHH.
+
+Los tres rechazos posibles ya tienen mensaje propio en la UI (`invalid_state`,
+`forbidden`, `wrong_account`).
 
 ---
 

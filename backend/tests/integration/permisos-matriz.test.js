@@ -91,12 +91,11 @@ const ENDPOINTS = [
     body: { nombre: 'Postulante Matriz', email: 'matriz@test.com', cargoPostulado: 'Analista' },
   },
 
-  // ── Gmail: JefeRRHH solo ve el estado (minimo privilegio) ──
-  // auth-url niega a JefeRRHH a proposito: el callback no valida que la cuenta
-  // autorizada sea la casilla de reclutamiento. Sin esperado: su codigo depende
-  // de GMAIL_CLIENT_ID. process y preview se retiraron (ver mas abajo).
+  // ── Gmail ──
+  // auth-url incluye a JefeRRHH: el callback solo acepta la casilla de
+  // reclutamiento. Sin esperado: su codigo depende de GMAIL_CLIENT_ID. process y preview se retiraron (ver mas abajo).
   { grupo: 'gmail', method: 'get', path: '/api/gmail/status', permitidos: PRIVILEGIADOS, esperado: 200 },
-  { grupo: 'gmail', method: 'get', path: '/api/gmail/auth-url', permitidos: ADMIN_Y_RRHH },
+  { grupo: 'gmail', method: 'get', path: '/api/gmail/auth-url', permitidos: PRIVILEGIADOS },
 ]
 
 // Los adjuntos van aparte: cuelgan de un referido y su controlador aplica

@@ -34,10 +34,9 @@ async function seedRolExterno(getModel) {
   return rol
 }
 
+// auth-url incluye a JefeRRHH: el callback solo acepta la casilla de
+// reclutamiento, asi que conectar ya no permite repuntar la sincronizacion.
 const ROLES_PRIVILEGIADOS = ['RRHH', 'ADMIN', 'JefeRRHH']
-// auth-url queda en RRHH/ADMIN: el callback no valida que la cuenta autorizada
-// sea la casilla de reclutamiento. JefeRRHH se niega a proposito.
-const ROLES_ADMIN_Y_RRHH = ['RRHH', 'ADMIN']
 
 // Los endpoints bajo prueba. `statusAutorizado` es el codigo funcional que
 // devuelve el handler cuando el rol si tiene permiso y Gmail no esta
@@ -56,8 +55,8 @@ const ENDPOINTS = [
     method: 'get',
     path: '/api/gmail/auth-url',
     statusAutorizado: 200,
-    autorizados: ROLES_ADMIN_Y_RRHH,
-    denegados: ['TRABAJADOR', 'EXTERNO', 'JefeRRHH'],
+    autorizados: ROLES_PRIVILEGIADOS,
+    denegados: ['TRABAJADOR', 'EXTERNO'],
   },
   {
     nombre: 'POST /api/referidos/sync/gmail',

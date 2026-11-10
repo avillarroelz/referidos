@@ -22,6 +22,10 @@
 
 const TOKEN_DEL_ATACANTE = 'refresh-token-de-la-casilla-del-atacante'
 const CORREO_DEL_ATACANTE = 'atacante@gmail.com'
+const CASILLA_DE_RECLUTAMIENTO = 'reclutamiento@ecora.cl'
+
+// La cuenta que "autoriza" en Google. Prefijo mock: lo lee la fabrica de jest.mock.
+let mockCorreoAutorizado = CORREO_DEL_ATACANTE
 
 // Sustituye el intercambio real con Google: el codigo se canjea "con exito" por
 // las credenciales de una casilla cualquiera.
@@ -33,7 +37,7 @@ jest.mock('googleapis', () => {
     google: {
       auth: { OAuth2: jest.fn(() => ({ getToken, setCredentials: jest.fn() })) },
       gmail: jest.fn(() => ({
-        users: { getProfile: jest.fn(async () => ({ data: { emailAddress: 'atacante@gmail.com' } })) },
+        users: { getProfile: jest.fn(async () => ({ data: { emailAddress: mockCorreoAutorizado } })) },
       })),
     },
   }
@@ -158,9 +162,12 @@ describe('V1: callback OAuth de Gmail y el parametro state', () => {
     let getModel
     let seq = 0
     const clientIdOriginal = process.env.GMAIL_CLIENT_ID
+    const casillaOriginal = process.env.GMAIL_SYNC_EMAIL
 
     beforeAll(async () => {
       process.env.GMAIL_CLIENT_ID = 'test-gmail-client-id'
+      // Sin la variable rige el valor por defecto, que es lo que se prueba.
+      delete process.env.GMAIL_SYNC_EMAIL
       const instancia = await db.__initTestDb()
       getModel = instancia.getModel
       await seedRoles(getModel)
@@ -169,10 +176,13 @@ describe('V1: callback OAuth de Gmail y el parametro state', () => {
     afterAll(async () => {
       if (clientIdOriginal === undefined) delete process.env.GMAIL_CLIENT_ID
       else process.env.GMAIL_CLIENT_ID = clientIdOriginal
+      if (casillaOriginal !== undefined) process.env.GMAIL_SYNC_EMAIL = casillaOriginal
+      mockCorreoAutorizado = CORREO_DEL_ATACANTE
       await db.__closeTestDb()
     })
 
     beforeEach(async () => {
+      mockCorreoAutorizado = CASILLA_DE_RECLUTAMIENTO
       await db.__resetTestDb()
       await seedRoles(getModel)
     })
@@ -212,13 +222,60 @@ describe('V1: callback OAuth de Gmail y el parametro state', () => {
       expect(guardado.configured_by).toBe(admin.id)
     })
 
-    it('un RRHH tambien puede conectar la casilla', async () => {
-      const rrhh = await crear('RRHH')
-      const { state, cookie } = await iniciarConexion(rrhh)
+    it.each(['RRHH', 'JefeRRHH'])('un %s tambien puede conectar la casilla', async (rol) => {
+      const usuario = await crear(rol)
+      const { state, cookie } = await iniciarConexion(usuario)
 
       await volverConCookie(state, cookie)
 
       expect(tokenStore.saveConfig).toHaveBeenCalledTimes(1)
+      expect(tokenStore.saveConfig.mock.calls[0][0].email).toBe(CASILLA_DE_RECLUTAMIENTO)
+    })
+
+    // La casilla es fija: un rol autorizado que consiente con OTRA cuenta de
+    // Google (la suya, por descuido o a proposito) no puede repuntar la
+    // sincronizacion de toda la empresa.
+    it('rechaza una cuenta de Google que no es la casilla de reclutamiento', async () => {
+      mockCorreoAutorizado = 'otra.persona@ecora.cl'
+      const admin = await crear('ADMIN')
+      const { state, cookie } = await iniciarConexion(admin)
+
+      const res = await volverConCookie(state, cookie)
+
+      expect(tokenStore.saveConfig).not.toHaveBeenCalled()
+      expect(res.headers.location).toContain('gmail_error=wrong_account')
+    })
+
+    it('acepta la casilla aunque Google la devuelva con otras mayusculas', async () => {
+      mockCorreoAutorizado = 'Reclutamiento@Ecora.cl'
+      const admin = await crear('ADMIN')
+      const { state, cookie } = await iniciarConexion(admin)
+
+      await volverConCookie(state, cookie)
+
+      expect(tokenStore.saveConfig).toHaveBeenCalledTimes(1)
+    })
+
+    // Una variable en blanco no puede dejar la casilla vacia (rechazaria todo).
+    it('con GMAIL_SYNC_EMAIL en blanco rige la casilla por defecto', async () => {
+      process.env.GMAIL_SYNC_EMAIL = '   '
+      const admin = await crear('ADMIN')
+      try {
+        const { state, cookie } = await iniciarConexion(admin)
+        await volverConCookie(state, cookie)
+      } finally {
+        delete process.env.GMAIL_SYNC_EMAIL
+      }
+
+      expect(tokenStore.saveConfig).toHaveBeenCalledTimes(1)
+    })
+
+    it('la URL de autorizacion sugiere la casilla de reclutamiento', async () => {
+      const admin = await crear('ADMIN')
+
+      const res = await request(app).get('/api/gmail/auth-url').set(authHeader(admin))
+
+      expect(new URL(res.body.authUrl).searchParams.get('login_hint')).toBe(CASILLA_DE_RECLUTAMIENTO)
     })
 
     // La comprobacion es contra la BASE: un state valido emitido para alguien

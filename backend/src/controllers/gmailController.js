@@ -7,7 +7,14 @@ const { detalleParaCliente } = require('../lib/detalleError')
 const { getModel } = require('../db')
 
 // Roles que pueden conectar la casilla de sincronizacion de la empresa.
-const ROLES_QUE_CONECTAN = ['ADMIN', 'RRHH']
+const ROLES_QUE_CONECTAN = ['ADMIN', 'RRHH', 'JefeRRHH']
+
+// La casilla de sincronizacion es UNA y fija. Cualquier otra cuenta de Google se
+// rechaza en el callback: es lo que permite que los tres roles puedan
+// (re)conectarla sin que nadie pueda repuntar la sincronizacion a otro buzon.
+const CASILLA_POR_DEFECTO = 'reclutamiento@ecora.cl'
+const casillaDeSincronizacion = () =>
+  (process.env.GMAIL_SYNC_EMAIL?.trim() || CASILLA_POR_DEFECTO).toLowerCase()
 
 // Exportar para usar en otros controladores (async)
 module.exports.getSyncRefreshToken = tokenStore.getSyncRefreshToken
@@ -46,6 +53,8 @@ exports.getAuthUrl = async (req, res) => {
     url.searchParams.set('scope', scopes.join(' '))
     url.searchParams.set('access_type', 'offline')
     url.searchParams.set('prompt', 'consent')
+    // Preselecciona la casilla en Google; el control real esta en el callback.
+    url.searchParams.set('login_hint', casillaDeSincronizacion())
     // searchParams y no concatenacion: pegar el state a mano depende de que la
     // URL ya traiga query string y se pierde en silencio si algun dia no la trae.
     url.searchParams.set('state', state)
@@ -143,6 +152,11 @@ exports.gmailOAuthCallback = async (req, res) => {
     const gmail = google.gmail({ auth: oauth2Client, version: 'v1' })
     const { data: profile } = await gmail.users.getProfile({ userId: 'me' })
 
+    if ((profile.emailAddress || '').trim().toLowerCase() !== casillaDeSincronizacion()) {
+      console.warn(`[gmail] callback rechazado: se autorizo una cuenta distinta de la casilla de sincronizacion (usuario ${adminId})`)
+      return res.redirect(`${frontendUrl}/referidos?gmail_error=wrong_account`)
+    }
+
     // Guardar en archivo de configuracion (centralizado)
     const config = {
       refresh_token: tokens.refresh_token,
@@ -179,7 +193,7 @@ exports.getGmailStatus = async (req, res) => {
 
     res.json({
       configured: hasConfigToken || hasEnvToken,
-      email: config.email || process.env.GMAIL_SYNC_EMAIL || null,
+      email: config.email || casillaDeSincronizacion(),
       configuredAt: config.configured_at || null,
       source: hasConfigToken ? tokenStore.storage : (hasEnvToken ? 'env' : null)
     })
