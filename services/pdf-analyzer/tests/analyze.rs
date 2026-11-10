@@ -182,3 +182,39 @@ fn detecta_magic_bytes_en_los_primeros_1024() {
     assert!(!has_pdf_magic(&late));
     assert!(!has_pdf_magic(b"esto no es un pdf"));
 }
+
+// CV reales llegan con el final del archivo dañado (exportados por apps de celular o reenviados por
+// correo). lopdf 0.47 los abre, pero pdf-extract (lopdf 0.42) los rechazaba con "invalid file trailer".
+fn texto_de(bytes: &[u8]) -> Vec<String> {
+    analyze(bytes, None).unwrap().text.iter().map(|t| norm(&t.text)).collect()
+}
+
+/// Reemplaza la primera aparición de `from`; el fixture no es UTF-8 válido, así que se opera en bytes.
+fn reemplazar(bytes: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    let at = bytes.windows(from.len()).position(|w| w == from).expect("el fixture cambió: no está el fragmento a dañar");
+    [&bytes[..at], to, &bytes[at + from.len()..]].concat()
+}
+
+const TEXTO_ESPERADO: [&str; 2] = ["Hola mundo PDF lab", "Segunda pagina con la palabra clave Spanner"];
+
+#[test]
+fn pdf_con_startxref_desplazado_se_repara_y_entrega_el_texto() {
+    let danado = reemplazar(&fixture("text.pdf"), b"startxref\n878", b"startxref\n870");
+
+    assert_eq!(texto_de(&danado), TEXTO_ESPERADO);
+}
+
+#[test]
+fn pdf_con_basura_despues_del_eof_entrega_el_texto() {
+    let mut danado = fixture("text.pdf");
+    danado.extend_from_slice(&b"\r\n<html>pie agregado por un servidor</html>\r\n".repeat(40));
+
+    assert_eq!(texto_de(&danado), TEXTO_ESPERADO);
+}
+
+#[test]
+fn pdf_sin_marca_eof_entrega_el_texto() {
+    let danado = reemplazar(&fixture("text.pdf"), b"%%EOF", b"");
+
+    assert_eq!(texto_de(&danado), TEXTO_ESPERADO);
+}

@@ -86,10 +86,13 @@ pub fn analyze(bytes: &[u8], q: Option<&str>) -> Result<Analysis, AnalyzeError> 
     let pages = doc.get_pages().len();
 
     let text_started = Instant::now();
-    let mut raw = pdf_extract::extract_text_from_mem_by_pages(bytes).map_err(|e| {
-        eprintln!("[pdf-analyzer] no se pudo extraer el texto (pdf-extract, {pages} páginas): {e}");
-        AnalyzeError::Parse
-    })?;
+    let mut raw = match pdf_extract::extract_text_from_mem_by_pages(bytes) {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!("[pdf-analyzer] pdf-extract rechazó el archivo ({pages} páginas): {e}; se reintenta reparado");
+            extract_text_repaired(&doc)?
+        }
+    };
     // Garantiza una entrada por página aunque ambas librerías discrepen en el conteo.
     raw.resize(pages, String::new());
     let text: Vec<PageText> = raw
@@ -117,6 +120,26 @@ pub fn analyze(bytes: &[u8], q: Option<&str>) -> Result<Analysis, AnalyzeError> 
         matches,
         timings: Timings { text_ms, images_ms, search_ms, total_ms: ms(started) },
     })
+}
+
+/// pdf-extract usa lopdf 0.42, más estricto que el 0.47 con el que ya se cargó `doc`: rechaza
+/// archivos con el final dañado (startxref corrido, basura tras %%EOF, sin %%EOF) que el 0.47 sí
+/// abre. Se reescribe el documento ya cargado —sale con xref y trailer correctos— y se reintenta.
+/// Si aun así falla, se extrae con lopdf directo: pierde saltos de línea, pero entrega el texto.
+fn extract_text_repaired(doc: &Document) -> Result<Vec<String>, AnalyzeError> {
+    let mut repaired = Vec::new();
+    if doc.clone().save_to(&mut repaired).is_ok()
+        && let Ok(raw) = pdf_extract::extract_text_from_mem_by_pages(&repaired)
+    {
+        return Ok(raw);
+    }
+    let direct: Vec<String> =
+        doc.get_pages().keys().map(|number| doc.extract_text(&[*number]).unwrap_or_default()).collect();
+    if direct.iter().all(|text| text.trim().is_empty()) {
+        eprintln!("[pdf-analyzer] tampoco se pudo extraer el texto del archivo reparado");
+        return Err(AnalyzeError::Parse);
+    }
+    Ok(direct)
 }
 
 /// `%PDF-` debe aparecer dentro de los primeros 1024 bytes.
