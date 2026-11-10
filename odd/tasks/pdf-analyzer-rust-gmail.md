@@ -52,7 +52,17 @@ Fuera de alcance: analizar los CV de `/postular`, OCR, Word (sigue con mammoth).
 - `pdfAnalyzerClient` conserva el status HTTP ante una respuesta que no es JSON, sin copiar el cuerpo al error.
 - (Gmail) el permiso de una cuenta rechazada por `wrong_account` se revoca en Google.
 
+- Revisor (segunda auditoría, sin bloqueantes): la vigilancia ahora parte con el hilo y no depende de que el
+  cliente siga conectado; la revocación no toca la casilla hoy conectada; la reparación no clona el documento
+  y tiene tope de 64 MB.
+- Evidencia 10-11 13:14, tag `03862af`: mismos 8 PDF reales, 6 con texto (los 2 vacíos son escaneados);
+  respuesta del sidecar para esos 8 PDF: 1969 KB con imágenes → 28 KB sin ellas. Rust 31 tests, jest 948 pasan.
+  Sidecar: 10 MB, 0 reinicios. Rollback inmediato: `TAG=8c6f907` (`.env.bak-pre-03862af`).
+
 ## Deuda detectada (revisor, no resuelta)
+- `revokeToken` y `getProfile` del callback de Gmail no tienen timeout propio.
+- El backend no distingue "CV escaneado" de "analizador caído": en ambos casos el CV queda sin texto.
+- Un PDF que deje pegado al analizador sigue en la casilla y cada vista previa lo reenvía (~90 s sin análisis cada vez).
 - Sin tope de PDF por correo ni heartbeat SSE: con el sidecar saturado, un correo con varios PDF puede
   demorar la vista previa más que el timeout del proxy.
 - Limitaciones de la plantilla que siguen: sin OCR, ligaduras sin normalizar, imágenes incompletas.
