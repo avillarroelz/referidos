@@ -38,7 +38,7 @@ Fuera de alcance: analizar los CV de `/postular`, OCR, Word (sigue con mammoth).
 - [x] `gmailService` usa el cliente (TDD) y se retira `pdf-parse`. jest 941 pasan / 3 omitidas
 - [x] Dockerfile + compose; imagen probada en Linux con read-only, cap-drop ALL y 768 MB (200/400/422)
 - [x] Revisor: sin bloqueantes. Aplicado: `cpus` y `pids_limit`; reinicio documentado en DEPLOY 5.8
-- [ ] Deploy + verificación con un CV real
+- [x] Deploy + verificación con CV reales (10-11, tag `8c6f907`)
 
 ## Criterios de aceptación
 1. cargo test, clippy, jest y vitest en verde.
@@ -55,7 +55,14 @@ Fuera de alcance: analizar los CV de `/postular`, OCR, Word (sigue con mammoth).
 - Limitaciones de la plantilla que siguen: sin OCR, ligaduras sin normalizar, imágenes incompletas.
 
 ## Evidencia
-(pendiente del deploy)
+- 10-11 12:27 producción en `8c6f907` (backend, frontend y pdf-analyzer). Health 200, 6 cabeceras, base conectada.
+- Aislamiento: el backend responde `/health` del sidecar; el frontend no resuelve `pdf-analyzer`; desde fuera el 4002 no responde.
+- Vista previa real (10 correos): 4 `ai-doc`. Extracción directa en el contenedor sobre esos 10 correos:
+  8 PDF, 6 con texto (860 a 7068 caracteres, 7 a 55 ms), 2 con 0 caracteres y sin error (escaneados, sin OCR).
+- Hallazgo en producción: pdf-extract rechazaba 2 de esos PDF con "invalid file trailer". Arreglado en `8c6f907`
+  (se reescribe el documento con lopdf 0.47 y se reintenta); ahora entregan 5781 y 5832 caracteres. 27 tests.
+- Sidecar tras la prueba: 9 MB, 0 reinicios, sin OOM.
+- Rollback: `TAG=289962b` con `docker-compose.yml.bak-pre-9243787` (el compose anterior no conoce el sidecar ni ese tag de pdf-analyzer).
 
 ## Progreso / siguiente paso
-10-11: tarea registrada. Siguiente: copiar plantilla y correr sus tests.
+10-11: CERRADO. Queda la deuda listada arriba; la más útil es OCR para los CV escaneados (2 de 8 en la muestra).
