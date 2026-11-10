@@ -11,6 +11,30 @@ services:
       - ./rds-ca.pem:/app/certs/rds-ca.pem:ro
     expose:
       - "8080"
+    networks:
+      - default
+      - pdf
+    restart: unless-stopped
+
+  # Analizador de PDF (Rust). Sin autenticación: no publica puertos y vive en una
+  # red interna sin salida a internet que solo comparte con el backend
+  # (backend.env: PDF_ANALYZER_URL=http://pdf-analyzer:4002).
+  pdf-analyzer:
+    image: ${ECR_REGISTRY}/referidos-pdf-analyzer:${TAG:-latest}
+    environment:
+      # La EC2 tiene 1,9 GB: un análisis a la vez y techo de memoria, para que un
+      # PDF pesado tumbe este contenedor y no al backend.
+      MAX_CONCURRENCY: "1"
+    mem_limit: 768m
+    cpus: "1.0"
+    pids_limit: 128
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - pdf
     restart: unless-stopped
 
   frontend:
@@ -32,6 +56,10 @@ services:
       - backend
       - frontend
     restart: unless-stopped
+
+networks:
+  pdf:
+    internal: true
 
 volumes:
   caddy_data:

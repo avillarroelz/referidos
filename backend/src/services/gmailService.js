@@ -1,10 +1,10 @@
 // backend/src/services/gmailService.js
 const { google } = require('googleapis')
 const emailParserAI = require('./emailParserAI')
+const pdfAnalyzerClient = require('./pdfAnalyzerClient')
 
 // Lazy-load para evitar crash si faltan dependencias
-let pdfParse, mammoth
-try { pdfParse = require('pdf-parse') } catch (e) { console.warn('[GmailService] pdf-parse no disponible') }
+let mammoth
 try { mammoth = require('mammoth') } catch (e) { console.warn('[GmailService] mammoth no disponible') }
 
 // Delay helper para throttling
@@ -14,6 +14,8 @@ class GmailService {
   constructor() {
     this.gmail = null
     this.auth = null
+    // Los PDF se analizan fuera de este proceso, en el sidecar Rust (services/pdf-analyzer).
+    this.pdfAnalyzer = pdfAnalyzerClient
   }
 
   async initialize(credentials) {
@@ -175,9 +177,9 @@ class GmailService {
     const mime = (mimeType || '').toLowerCase()
 
     try {
-      if ((name.endsWith('.pdf') || mime.includes('pdf')) && pdfParse) {
-        const result = await pdfParse(buffer)
-        return result.text || ''
+      if (name.endsWith('.pdf') || mime.includes('pdf')) {
+        const result = await this.pdfAnalyzer.analyzePdf(buffer)
+        return (result.text || []).map(p => p.text).filter(Boolean).join('\n\n')
       }
 
       if ((name.endsWith('.docx') || mime.includes('word') || mime.includes('document')) && mammoth) {

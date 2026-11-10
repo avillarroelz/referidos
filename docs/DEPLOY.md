@@ -97,9 +97,14 @@ TAG=$(git rev-parse --short HEAD)
 
 docker build -t "$ECR_REGISTRY/referidos-backend:$TAG"  ./backend
 docker build -t "$ECR_REGISTRY/referidos-frontend:$TAG" ./frontend
+docker build -t "$ECR_REGISTRY/referidos-pdf-analyzer:$TAG" ./services/pdf-analyzer
 docker push "$ECR_REGISTRY/referidos-backend:$TAG"
 docker push "$ECR_REGISTRY/referidos-frontend:$TAG"
+docker push "$ECR_REGISTRY/referidos-pdf-analyzer:$TAG"
 ```
+
+El build de `pdf-analyzer` corre sus tests dentro de la imagen de compilación: si
+fallan en Linux, no hay imagen.
 
 Usar el hash del commit como tag en vez de `latest` hace que revertir sea
 cambiar una variable, y no reconstruir.
@@ -197,6 +202,25 @@ JefeRRHH y RRHH.
 
 Los tres rechazos posibles ya tienen mensaje propio en la UI (`invalid_state`,
 `forbidden`, `wrong_account`).
+
+### 5.8 Analizador de PDF (sidecar Rust)
+
+El texto de los CV en PDF de la sincronización de Gmail lo extrae el servicio
+`pdf-analyzer`. No tiene autenticación: no publica puertos y vive en la red
+interna `pdf`, que solo comparte con el backend. `backend.env` debe traer
+`PDF_ANALYZER_URL=http://pdf-analyzer:4002`.
+
+```bash
+docker compose exec backend node -e "fetch(process.env.PDF_ANALYZER_URL+'/health').then(r=>r.text()).then(console.log)"
+curl -m 5 http://<ip-publica>:4002/health   # desde fuera: debe fallar
+```
+
+Si el sidecar no responde, la sincronización sigue: el CV queda sin texto y la IA
+usa el cuerpo del correo. Los PDF escaneados (sin capa de texto) devuelven vacío;
+no hay OCR.
+
+Un PDF que deje al analizador en bucle retiene su único cupo y todo lo demás recibe
+503 (los CV quedan sin texto). No se recupera solo: `docker compose restart pdf-analyzer`.
 
 ---
 
