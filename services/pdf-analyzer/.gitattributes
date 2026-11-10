@@ -1,0 +1,2 @@
+# PDFs sintéticos sin bytes nulos: sin esto git los trata como texto y autocrlf los corrompe
+fixtures/*.pdf binary
