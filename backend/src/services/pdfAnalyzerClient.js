@@ -19,17 +19,26 @@ class PdfAnalyzerError extends Error {
   }
 }
 
-async function analyzePdf(buffer, { q, signal } = {}) {
+// images: false le pide al sidecar que no extraiga imágenes (la respuesta no las trae).
+async function analyzePdf(buffer, { q, images, signal } = {}) {
   const url = new URL('/analyze', baseUrl())
   if (q) url.searchParams.set('q', q)
+  if (images === false) url.searchParams.set('images', 'false')
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/pdf' },
     body: buffer,
     signal: signal ?? AbortSignal.timeout(CLIENT_TIMEOUT_MS),
   })
-  const body = await res.json()
-  if (!res.ok) throw new PdfAnalyzerError(res.status, body.error ?? 'Error del analizador de PDF')
+  // Un proxy o un contenedor a medio arrancar puede responder algo que no es JSON. El error
+  // lleva el status y nunca el cuerpo: en un 200 mal formado el cuerpo sería texto de un CV.
+  let body
+  try {
+    body = JSON.parse(await res.text())
+  } catch {
+    throw new PdfAnalyzerError(res.status, 'Respuesta no válida del analizador de PDF')
+  }
+  if (!res.ok) throw new PdfAnalyzerError(res.status, body?.error ?? 'Error del analizador de PDF')
   return body
 }
 

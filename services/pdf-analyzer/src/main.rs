@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use pdf_analyzer::{AnalyzeError, analyze, has_pdf_magic};
+use pdf_analyzer::{AnalyzeError, analyze_with, has_pdf_magic};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -19,6 +19,8 @@ const ANALYZE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Cuánto espera una petición por un cupo antes de recibir 503.
 const QUEUE_WAIT: Duration = Duration::from_secs(10);
 const DEFAULT_MAX_CONCURRENCY: usize = 2;
+/// Plazo extra, después del timeout, antes de dar un análisis por pegado.
+const STUCK_AFTER: Duration = Duration::from_secs(60);
 
 enum Limited {
     /// No hubo cupo dentro de la espera (HTTP 503).
@@ -33,10 +35,21 @@ enum Limited {
 /// El cupo viaja DENTRO del hilo: spawn_blocking no se cancela, así que tras un timeout el
 /// análisis sigue corriendo y su cupo sigue tomado hasta que termina de verdad. Sin eso, una
 /// ráfaga de PDFs lentos acumularía hilos sin límite aunque cada cliente ya recibió su 504.
-async fn run_limited<T, F>(permits: &Arc<Semaphore>, queue_wait: Duration, timeout: Duration, work: F) -> Result<T, Limited>
+/// Si `stuck_after` después del timeout el hilo sigue sin terminar, se llama a `on_stuck`: ese
+/// cupo no va a volver solo. La vigilancia corre en una tarea aparte desde que parte el hilo,
+/// porque axum descarta este future si el cliente corta la conexión.
+async fn run_limited<T, F, S>(
+    permits: &Arc<Semaphore>,
+    queue_wait: Duration,
+    timeout: Duration,
+    stuck_after: Duration,
+    on_stuck: S,
+    work: F,
+) -> Result<T, Limited>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
+    S: FnOnce() + Send + 'static,
 {
     let permit = match tokio::time::timeout(queue_wait, permits.clone().acquire_owned()).await {
         Ok(Ok(permit)) => permit,
@@ -47,10 +60,19 @@ where
         let _permit = permit;
         work()
     });
-    match tokio::time::timeout(timeout, task).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(_)) => Err(Limited::Panicked),
-        Err(_) => Err(Limited::Timeout),
+    let (done, result) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        match tokio::time::timeout(timeout + stuck_after, task).await {
+            // Si nadie espera ya la respuesta, el envío falla y no importa.
+            Ok(joined) => drop(done.send(joined)),
+            Err(_) => on_stuck(),
+        }
+    });
+    match tokio::time::timeout(timeout, result).await {
+        Ok(Ok(Ok(value))) => Ok(value),
+        Ok(Ok(Err(_))) => Err(Limited::Panicked),
+        // Venció el plazo (o la vigilancia ya dio el hilo por pegado).
+        Ok(Err(_)) | Err(_) => Err(Limited::Timeout),
     }
 }
 
@@ -66,6 +88,16 @@ impl IntoResponse for ApiError {
 #[derive(Deserialize)]
 struct AnalyzeParams {
     q: Option<String>,
+    /// `images=false` omite la extracción de imágenes (por defecto se incluyen).
+    images: Option<bool>,
+}
+
+/// Un hilo de análisis no se puede cancelar. Si quedó pegado, lo único que devuelve el cupo es
+/// terminar el proceso; el orquestador (restart: unless-stopped) lo levanta de nuevo.
+fn exit_stuck() {
+    let limit = (ANALYZE_TIMEOUT + STUCK_AFTER).as_secs();
+    eprintln!("[pdf-analyzer] un análisis lleva más de {limit} s sin terminar: se reinicia el proceso");
+    std::process::exit(1);
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -98,7 +130,11 @@ async fn analyze_handler(
         return Err(ApiError(StatusCode::UNSUPPORTED_MEDIA_TYPE, "El body no es un PDF"));
     }
 
-    let result = run_limited(&permits, QUEUE_WAIT, ANALYZE_TIMEOUT, move || analyze(&bytes, params.q.as_deref())).await;
+    let with_images = params.images.unwrap_or(true);
+    let result = run_limited(&permits, QUEUE_WAIT, ANALYZE_TIMEOUT, STUCK_AFTER, exit_stuck, move || {
+        analyze_with(&bytes, params.q.as_deref(), with_images)
+    })
+    .await;
     match result {
         Ok(Ok(analysis)) => Ok(Json(analysis).into_response()),
         Ok(Err(AnalyzeError::Parse)) | Err(Limited::Panicked) => {
@@ -138,6 +174,10 @@ async fn main() {
 mod tests {
     use super::*;
 
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    const SIN_VIGILANCIA: Duration = Duration::from_secs(3600);
+
     fn un_cupo() -> Arc<Semaphore> {
         Arc::new(Semaphore::new(1))
     }
@@ -147,7 +187,7 @@ mod tests {
         let permits = un_cupo();
         let _tomado = permits.clone().acquire_owned().await.unwrap();
 
-        let r = run_limited(&permits, Duration::from_millis(30), Duration::from_secs(1), || 1).await;
+        let r = run_limited(&permits, Duration::from_millis(30), Duration::from_secs(1), SIN_VIGILANCIA, || {}, || 1).await;
 
         assert!(matches!(r, Err(Limited::Busy)));
     }
@@ -156,7 +196,7 @@ mod tests {
     async fn el_cupo_sigue_tomado_tras_el_timeout_hasta_que_el_trabajo_termina() {
         let permits = un_cupo();
 
-        let r = run_limited(&permits, Duration::from_millis(30), Duration::from_millis(50), || {
+        let r = run_limited(&permits, Duration::from_millis(30), Duration::from_millis(50), SIN_VIGILANCIA, || {}, || {
             std::thread::sleep(Duration::from_millis(400))
         })
         .await;
@@ -172,7 +212,7 @@ mod tests {
     async fn un_panic_del_trabajo_libera_el_cupo() {
         let permits = un_cupo();
 
-        let r = run_limited(&permits, Duration::from_millis(30), Duration::from_secs(1), || -> u8 {
+        let r = run_limited(&permits, Duration::from_millis(30), Duration::from_secs(1), SIN_VIGILANCIA, || {}, || -> u8 {
             panic!("pdf hostil")
         })
         .await;
@@ -183,7 +223,78 @@ mod tests {
 
     #[tokio::test]
     async fn con_cupo_devuelve_el_resultado() {
-        let r = run_limited(&un_cupo(), Duration::from_millis(30), Duration::from_secs(1), || 7).await;
+        let r = run_limited(&un_cupo(), Duration::from_millis(30), Duration::from_secs(1), SIN_VIGILANCIA, || {}, || 7).await;
         assert!(matches!(r, Ok(7)));
+    }
+
+    // spawn_blocking no se cancela: un PDF que deje al análisis en bucle retendría el único cupo
+    // para siempre. Pasado el plazo extra se avisa (en producción: se termina el proceso y Docker
+    // lo levanta de nuevo).
+    #[tokio::test]
+    async fn un_trabajo_pegado_dispara_el_aviso_tras_el_plazo_extra() {
+        let avisado = Arc::new(AtomicBool::new(false));
+        let bandera = avisado.clone();
+
+        let r = run_limited(
+            &un_cupo(),
+            Duration::from_millis(30),
+            Duration::from_millis(50),
+            Duration::from_millis(400),
+            move || bandera.store(true, Ordering::SeqCst),
+            || std::thread::sleep(Duration::from_millis(1500)),
+        )
+        .await;
+
+        assert!(matches!(r, Err(Limited::Timeout)));
+        assert!(!avisado.load(Ordering::SeqCst), "no debe avisar antes del plazo extra");
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(avisado.load(Ordering::SeqCst));
+    }
+
+    // axum descarta el future del handler cuando el cliente corta (p. ej. el backend se reinicia
+    // con una petición en vuelo). El hilo sigue pegado igual: la vigilancia no puede depender de
+    // que alguien siga esperando la respuesta.
+    #[tokio::test]
+    async fn la_vigilancia_sigue_aunque_el_cliente_corte_antes_del_timeout() {
+        let avisado = Arc::new(AtomicBool::new(false));
+        let bandera = avisado.clone();
+        let permits = un_cupo();
+
+        let cortado = tokio::time::timeout(
+            Duration::from_millis(20),
+            run_limited(
+                &permits,
+                Duration::from_millis(30),
+                Duration::from_millis(100),
+                Duration::from_millis(200),
+                move || bandera.store(true, Ordering::SeqCst),
+                || std::thread::sleep(Duration::from_millis(1500)),
+            ),
+        )
+        .await;
+
+        assert!(cortado.is_err(), "el cliente cortó antes del timeout del análisis");
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(avisado.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn un_trabajo_lento_que_termina_dentro_del_plazo_extra_no_dispara_el_aviso() {
+        let avisado = Arc::new(AtomicBool::new(false));
+        let bandera = avisado.clone();
+
+        let r = run_limited(
+            &un_cupo(),
+            Duration::from_millis(30),
+            Duration::from_millis(50),
+            Duration::from_millis(600),
+            move || bandera.store(true, Ordering::SeqCst),
+            || std::thread::sleep(Duration::from_millis(200)),
+        )
+        .await;
+
+        assert!(matches!(r, Err(Limited::Timeout)));
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert!(!avisado.load(Ordering::SeqCst));
     }
 }

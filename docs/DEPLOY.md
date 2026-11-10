@@ -220,7 +220,14 @@ usa el cuerpo del correo. Los PDF escaneados (sin capa de texto) devuelven vací
 no hay OCR.
 
 Un PDF que deje al analizador en bucle retiene su único cupo y todo lo demás recibe
-503 (los CV quedan sin texto). No se recupera solo: `docker compose restart pdf-analyzer`.
+503 (los CV quedan sin texto). A los 90 s el proceso se termina solo y Docker lo
+levanta de nuevo (`restart: unless-stopped`); queda la línea "se reinicia el proceso"
+en `docker compose logs pdf-analyzer`. Si se repite, hay un PDF concreto que lo provoca
+(sigue en la casilla y cada vista previa lo reenvía). Con `MAX_CONCURRENCY` mayor que 1,
+ese reinicio corta también los análisis sanos en curso.
+
+Cambiar `GMAIL_SYNC_EMAIL` exige reconectar la casilla nueva desde el panel: hasta
+entonces la sincronización sigue con el token de la anterior.
 
 ---
 

@@ -154,6 +154,19 @@ exports.gmailOAuthCallback = async (req, res) => {
 
     if ((profile.emailAddress || '').trim().toLowerCase() !== casillaDeSincronizacion()) {
       console.warn(`[gmail] callback rechazado: se autorizo una cuenta distinta de la casilla de sincronizacion (usuario ${adminId})`)
+      // El consentimiento ya quedo otorgado en Google sobre el buzon de esa persona.
+      // Se revoca para no dejar una autorizacion viva que nadie va a usar; si falla,
+      // el rechazo sigue igual (el token no se guarda en ninguna parte).
+      // Excepcion: si la cuenta rechazada es la que hoy esta conectada (GMAIL_SYNC_EMAIL
+      // mal configurada), revocar mataria el token vigente de la sincronizacion.
+      try {
+        const conectada = ((await tokenStore.readConfig()).email || '').trim().toLowerCase()
+        if (conectada !== profile.emailAddress.trim().toLowerCase()) {
+          await oauth2Client.revokeToken(tokens.refresh_token)
+        }
+      } catch (e) {
+        console.warn('[gmail] no se pudo revocar el permiso de la cuenta rechazada:', e.message)
+      }
       return res.redirect(`${frontendUrl}/referidos?gmail_error=wrong_account`)
     }
 

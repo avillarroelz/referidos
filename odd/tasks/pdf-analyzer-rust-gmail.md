@@ -46,12 +46,15 @@ Fuera de alcance: analizar los CV de `/postular`, OCR, Word (sigue con mammoth).
    y el log del sidecar muestra la petición.
 3. El sidecar no es alcanzable desde fuera de la EC2.
 
+## Segunda pasada (10-11, tarde): deuda del revisor resuelta
+- `?images=false`: el backend ya no recibe las imágenes del CV.
+- Vigilante: si un análisis sigue sin terminar 60 s después de su timeout, el proceso sale y Docker lo levanta.
+- `pdfAnalyzerClient` conserva el status HTTP ante una respuesta que no es JSON, sin copiar el cuerpo al error.
+- (Gmail) el permiso de una cuenta rechazada por `wrong_account` se revoca en Google.
+
 ## Deuda detectada (revisor, no resuelta)
-- El sidecar devuelve imágenes en base64 que el backend descarta; falta `?images=false` o tope de respuesta.
-- Un PDF en bucle deja el sidecar en 503 hasta reiniciarlo a mano (sin healthcheck ni autoreinicio).
 - Sin tope de PDF por correo ni heartbeat SSE: con el sidecar saturado, un correo con varios PDF puede
   demorar la vista previa más que el timeout del proxy.
-- `pdfAnalyzerClient` pierde el status HTTP si la respuesta no es JSON.
 - Limitaciones de la plantilla que siguen: sin OCR, ligaduras sin normalizar, imágenes incompletas.
 
 ## Evidencia

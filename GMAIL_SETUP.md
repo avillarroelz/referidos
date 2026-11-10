@@ -78,7 +78,7 @@ Respuesta:
 #### Paso 2: Autorizar la aplicación
 
 1. Copia la URL de `authUrl` y ábrela en tu navegador
-2. Inicia sesión con la cuenta de Gmail que quieres conectar
+2. Inicia sesión con la casilla `reclutamiento@ecora.cl` (es la única que el sistema acepta; cualquier otra cuenta se rechaza y su permiso se revoca)
 3. Acepta los permisos solicitados
 4. Serás redirigido a `http://localhost:4000/api/gmail/oauth2callback?code=...`
 5. **Copia el valor del parámetro `code`** de la URL

@@ -17,7 +17,8 @@ describe('gmailService.extractTextFromFile con PDF', () => {
 
     const texto = await gmailService.extractTextFromFile(buffer, 'CV.PDF', 'application/pdf')
 
-    expect(analyzePdf).toHaveBeenCalledWith(buffer)
+    // Solo se usa el texto: las imágenes (fotos del CV) no se piden.
+    expect(analyzePdf).toHaveBeenCalledWith(buffer, { images: false })
     expect(texto).toBe('Juan Perez\n\nSoldador calificado')
   })
 

@@ -26,6 +26,7 @@ const CASILLA_DE_RECLUTAMIENTO = 'reclutamiento@ecora.cl'
 
 // La cuenta que "autoriza" en Google. Prefijo mock: lo lee la fabrica de jest.mock.
 let mockCorreoAutorizado = CORREO_DEL_ATACANTE
+const mockRevokeToken = jest.fn(async () => {})
 
 // Sustituye el intercambio real con Google: el codigo se canjea "con exito" por
 // las credenciales de una casilla cualquiera.
@@ -35,7 +36,7 @@ jest.mock('googleapis', () => {
   }))
   return {
     google: {
-      auth: { OAuth2: jest.fn(() => ({ getToken, setCredentials: jest.fn() })) },
+      auth: { OAuth2: jest.fn(() => ({ getToken, setCredentials: jest.fn(), revokeToken: mockRevokeToken })) },
       gmail: jest.fn(() => ({
         users: { getProfile: jest.fn(async () => ({ data: { emailAddress: mockCorreoAutorizado } })) },
       })),
@@ -244,6 +245,55 @@ describe('V1: callback OAuth de Gmail y el parametro state', () => {
 
       expect(tokenStore.saveConfig).not.toHaveBeenCalled()
       expect(res.headers.location).toContain('gmail_error=wrong_account')
+    })
+
+    // El consentimiento ya quedo otorgado en Google sobre el buzon de esa
+    // persona: si no se revoca, queda una autorizacion viva que nadie usa.
+    it('revoca en Google el permiso de la cuenta rechazada', async () => {
+      mockCorreoAutorizado = 'otra.persona@ecora.cl'
+      const admin = await crear('ADMIN')
+      const { state, cookie } = await iniciarConexion(admin)
+
+      await volverConCookie(state, cookie)
+
+      expect(mockRevokeToken).toHaveBeenCalledWith(TOKEN_DEL_ATACANTE)
+    })
+
+    it('rechaza igual aunque la revocacion falle', async () => {
+      mockCorreoAutorizado = 'otra.persona@ecora.cl'
+      mockRevokeToken.mockRejectedValueOnce(new Error('Google no responde'))
+      const admin = await crear('ADMIN')
+      const { state, cookie } = await iniciarConexion(admin)
+
+      const res = await volverConCookie(state, cookie)
+
+      expect(res.headers.location).toContain('gmail_error=wrong_account')
+      expect(tokenStore.saveConfig).not.toHaveBeenCalled()
+    })
+
+    // Si GMAIL_SYNC_EMAIL quedara mal configurada, la casilla que hoy esta
+    // conectada pasaria a ser "cuenta equivocada". Revocar ahi mataria el token
+    // vigente de la sincronizacion: se rechaza, pero no se revoca.
+    it('no revoca si la cuenta rechazada es la que esta conectada hoy', async () => {
+      mockCorreoAutorizado = 'Casilla.Vigente@ecora.cl'
+      tokenStore.readConfig.mockResolvedValueOnce({ email: 'casilla.vigente@ecora.cl', refresh_token: 'vigente' })
+      const admin = await crear('ADMIN')
+      const { state, cookie } = await iniciarConexion(admin)
+
+      const res = await volverConCookie(state, cookie)
+
+      expect(res.headers.location).toContain('gmail_error=wrong_account')
+      expect(mockRevokeToken).not.toHaveBeenCalled()
+      expect(tokenStore.saveConfig).not.toHaveBeenCalled()
+    })
+
+    it('no revoca nada cuando la cuenta es la casilla', async () => {
+      const admin = await crear('ADMIN')
+      const { state, cookie } = await iniciarConexion(admin)
+
+      await volverConCookie(state, cookie)
+
+      expect(mockRevokeToken).not.toHaveBeenCalled()
     })
 
     it('acepta la casilla aunque Google la devuelva con otras mayusculas', async () => {

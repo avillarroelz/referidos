@@ -1,4 +1,4 @@
-use pdf_analyzer::{AnalyzeError, analyze, has_pdf_magic};
+use pdf_analyzer::{AnalyzeError, analyze, analyze_with, has_pdf_magic};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -217,4 +217,14 @@ fn pdf_sin_marca_eof_entrega_el_texto() {
     let danado = reemplazar(&fixture("text.pdf"), b"%%EOF", b"");
 
     assert_eq!(texto_de(&danado), TEXTO_ESPERADO);
+}
+
+// El backend de Referidos solo usa el texto: sin imágenes la respuesta no carga las fotos del CV.
+#[test]
+fn sin_imagenes_no_las_extrae_pero_entrega_el_resto() {
+    let a = analyze_with(&fixture("image.pdf"), None, false).unwrap();
+    assert!(a.images.is_empty());
+    assert!(!a.images_truncated);
+    assert_eq!(a.pages, 1);
+    assert_eq!(analyze_with(&fixture("image.pdf"), None, true).unwrap().images.len(), 1);
 }

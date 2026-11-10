@@ -178,7 +178,7 @@ class GmailService {
 
     try {
       if (name.endsWith('.pdf') || mime.includes('pdf')) {
-        const result = await this.pdfAnalyzer.analyzePdf(buffer)
+        const result = await this.pdfAnalyzer.analyzePdf(buffer, { images: false })
         return (result.text || []).map(p => p.text).filter(Boolean).join('\n\n')
       }
 

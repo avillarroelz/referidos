@@ -56,6 +56,11 @@ if (!disponible) console.warn(`[pdf-analyzer] binario no compilado (${BINARY}): 
     })
   })
 
+  it('trae las imagenes salvo que se pidan sin ellas', async () => {
+    expect((await cliente.analyzePdf(fixture('image.pdf'))).images).toHaveLength(1)
+    expect((await cliente.analyzePdf(fixture('image.pdf'), { images: false })).images).toEqual([])
+  })
+
   it('algo que no es PDF lanza PdfAnalyzerError con status 415', async () => {
     await expect(cliente.analyzePdf(Buffer.from('no soy un pdf'))).rejects.toMatchObject({ status: 415 })
   })
