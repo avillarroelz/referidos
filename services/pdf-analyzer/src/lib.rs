@@ -72,14 +72,24 @@ pub enum AnalyzeError {
 pub fn analyze(bytes: &[u8], q: Option<&str>) -> Result<Analysis, AnalyzeError> {
     let started = Instant::now();
     let options = LoadOptions { max_decompressed_size: Some(MAX_STREAM_BYTES), ..Default::default() };
+    // Los eprintln de este archivo dejan la etapa y el tipo de error para diagnosticar un 400;
+    // los mensajes de lopdf/pdf-extract describen la estructura del archivo, no su texto.
     let doc = Document::load_mem_with_options(bytes, options).map_err(|e| {
-        if is_limit_error(&e) { AnalyzeError::ResourceLimit } else { AnalyzeError::Parse }
+        if is_limit_error(&e) {
+            AnalyzeError::ResourceLimit
+        } else {
+            eprintln!("[pdf-analyzer] no se pudo cargar el PDF (lopdf): {e}");
+            AnalyzeError::Parse
+        }
     })?;
     check_inflation(&doc)?;
     let pages = doc.get_pages().len();
 
     let text_started = Instant::now();
-    let mut raw = pdf_extract::extract_text_from_mem_by_pages(bytes).map_err(|_| AnalyzeError::Parse)?;
+    let mut raw = pdf_extract::extract_text_from_mem_by_pages(bytes).map_err(|e| {
+        eprintln!("[pdf-analyzer] no se pudo extraer el texto (pdf-extract, {pages} páginas): {e}");
+        AnalyzeError::Parse
+    })?;
     // Garantiza una entrada por página aunque ambas librerías discrepen en el conteo.
     raw.resize(pages, String::new());
     let text: Vec<PageText> = raw
