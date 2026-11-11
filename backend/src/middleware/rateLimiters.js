@@ -121,6 +121,24 @@ const authRefreshLimiter = rateLimit({
 })
 
 // ──────────────────────────────────────────────────────────────
+// Capa 3b — Bandeja de Gmail: vista previa de adjuntos, descartar, historial
+// Son peticiones livianas y frecuentes (revisar 20 correos son 20 vistas
+// previas): con el cupo de operaciones pesadas la pantalla se bloquea sola.
+// El techo sigue existiendo porque cada vista previa baja un adjunto de Gmail.
+// ──────────────────────────────────────────────────────────────
+const gmailBandejaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  keyGenerator: (req) => (req.auth?.id ? `bandeja:${req.auth.id}` : ipKeyGenerator(req.ip)),
+  message: {
+    error: 'Demasiadas consultas a la bandeja de Gmail. Espera unos minutos.',
+    code: 'TOO_MANY_REQUESTS',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+// ──────────────────────────────────────────────────────────────
 // Capa 2d — Recuperacion de contraseña: contador PROPIO
 // Antes compartia el de refresh, 20 por 15 min por IP, con dos problemas: se
 // podian disparar 20 correos al buzon de un tercero, y abusar de una ruta
@@ -201,5 +219,6 @@ module.exports = {
   forgotPasswordIpLimiter,
   forgotPasswordCorreoLimiter,
   heavyOpsLimiter,
+  gmailBandejaLimiter,
   publicFormLimiter,
 }

@@ -83,6 +83,13 @@ describe('redactBody', () => {
       expect(out.nombreReferidor).toBe(OCULTO)
     })
 
+    // El asunto y el remitente de un correo de postulacion identifican a la persona.
+    it('debe redactar from, subject, remitente y asunto de los correos de Gmail', () => {
+      const out = redactBody({ correos: [{ messageId: 'm1', from: 'Ana <ana@x.cl>', subject: 'CV Ana Rojas', remitente: 'a', asunto: 'b' }] })
+
+      expect(out.correos[0]).toEqual({ messageId: 'm1', from: OCULTO, subject: OCULTO, remitente: OCULTO, asunto: OCULTO })
+    })
+
     it('NO debe redactar nombreUnidad ni nombreLinea, que no son datos de una persona', () => {
       const out = redactBody({ nombreUnidad: 'Operaciones Norte', nombreLinea: 'Mineria' })
 

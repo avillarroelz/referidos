@@ -12,6 +12,14 @@
 // La tabla se recorre en vez de escribirse caso por caso a proposito: agregar un
 // endpoint a la matriz es una linea, y olvidarse de un rol deja de ser posible.
 
+// Sin token de sincronizacion: ningun caso feliz de las rutas de Gmail sale a la red.
+jest.mock('../../src/services/gmailTokenStore', () => ({
+  readConfig: jest.fn(async () => ({})),
+  saveConfig: jest.fn(async () => {}),
+  getSyncRefreshToken: jest.fn(async () => null),
+  storage: 'file',
+}))
+
 const request = require('supertest')
 const { app } = require('../../src/app')
 const db = require('../../src/db')
@@ -96,6 +104,12 @@ const ENDPOINTS = [
   // reclutamiento. Sin esperado: su codigo depende de GMAIL_CLIENT_ID. process y preview se retiraron (ver mas abajo).
   { grupo: 'gmail', method: 'get', path: '/api/gmail/status', permitidos: PRIVILEGIADOS, esperado: 200 },
   { grupo: 'gmail', method: 'get', path: '/api/gmail/auth-url', permitidos: PRIVILEGIADOS },
+  // Modulo Gmail (bandeja): registro de correos revisados y vista previa de adjuntos.
+  { grupo: 'gmail', method: 'post', path: '/api/gmail/correos/descartar', permitidos: PRIVILEGIADOS, body: { correos: [{ messageId: 'matriz-1' }] }, esperado: 200 },
+  { grupo: 'gmail', method: 'get', path: '/api/gmail/correos/historial', permitidos: PRIVILEGIADOS, esperado: 200 },
+  { grupo: 'gmail', method: 'get', path: '/api/gmail/correos/matriz-2/adjuntos/0', permitidos: PRIVILEGIADOS, esperado: 400 }, // casilla sin conectar
+  { grupo: 'gmail', method: 'delete', path: '/api/gmail/correos/matriz-3', permitidos: PRIVILEGIADOS, esperado: 404 },
+  { grupo: 'gmail', method: 'post', path: '/api/gmail/correos/matriz-4/adjuntar', permitidos: PRIVILEGIADOS, body: { referidoId: 999999 }, esperado: 404 },
 ]
 
 // Los adjuntos van aparte: cuelgan de un referido y su controlador aplica

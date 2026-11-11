@@ -6,12 +6,10 @@ const { ESTADOS, DICTAMEN_ADC, puedePasar } = require('../lib/estados')
 const { puedeAccederReferido } = require('../lib/acceso')
 const { detalleParaCliente, detalleOGenerico } = require('../lib/detalleError')
 const gmailService = require('../services/gmailService')
-const s3Service = require('../services/s3Service')
-const { logger } = require('../utils/logger')
+const { guardarAdjuntosDeCorreo } = require('../services/gmailAdjuntos')
+const { buscarCorreoRevisado, idsYaRevisados, anotarCorreoImportado } = require('../services/gmailRegistro')
 const { config } = require('../config')
 const { notificarCambioEstado, notificarAsignacion } = require('../services/notificationService')
-const fs = require('fs')
-const path = require('path')
 
 // Modelos
 const Referido = getModel('Referido')
@@ -533,6 +531,12 @@ async function syncFromGmail(req, res) {
           continue
         }
 
+        // Descartado (o adjuntado a otra ficha) en la bandeja: no vuelve a entrar.
+        if (await buscarCorreoRevisado(messages[i].id)) {
+          results.skipped++
+          continue
+        }
+
         const emailData = await gmailService.processOneEmail(messages[i].id)
         results.processed++
 
@@ -553,7 +557,7 @@ async function syncFromGmail(req, res) {
           }
         }
 
-        await Referido.create({
+        const creado = await Referido.create({
           nombre: d.nombre.trim(),
           email: d.email || null,
           telefono: d.telefono || null,
@@ -566,6 +570,14 @@ async function syncFromGmail(req, res) {
           gmailMessageId: messages[i].id
         })
         results.created++
+
+        await anotarCorreoImportado({
+          messageId: messages[i].id,
+          from: emailData.from,
+          subject: emailData.subject,
+          referidoId: creado.id,
+          userId: req.auth.id,
+        })
 
         if (options.autoMarkRead) await gmailService.markAsRead(messages[i].id)
         if (options.addLabel) await gmailService.addLabel(messages[i].id, 'Referido-Procesado')
@@ -613,6 +625,39 @@ const previewGmailValidators = [
   query('maxResults').optional().isInt({ min: 1 }).toInt(),
 ]
 
+// Tope de ids que se piden a Gmail antes de excluir los ya revisados. Con 500 la
+// bandeja quedaba vacía en cuanto había 500 revisados recientes, aunque hubiera
+// correos pendientes más antiguos.
+const MAX_IDS_LISTADOS = 2000
+
+// `preguntas` llega como JSON en el query string. Devuelve el arreglo limpio
+// (vacío si no vino) o null si no cumple: 1-5 textos de 1-200 caracteres.
+function parsePreguntas(raw) {
+  if (raw === undefined) return []
+  if (typeof raw !== 'string') return null
+  let lista
+  try { lista = JSON.parse(raw) } catch { return null }
+  if (!Array.isArray(lista) || lista.length < 1 || lista.length > 5) return null
+  const limpias = []
+  for (const p of lista) {
+    if (typeof p !== 'string') return null
+    const t = p.trim()
+    if (t.length < 1 || t.length > 200) return null
+    limpias.push(t)
+  }
+  return limpias
+}
+
+// Referido existente con el mismo email o RUT que extrajo el análisis.
+async function buscarYaRegistrado(extracted = {}) {
+  const where = []
+  if (extracted.rut) where.push({ rut: extracted.rut })
+  if (extracted.email) where.push({ email: extracted.email })
+  if (where.length === 0) return null
+  const existente = await Referido.findOne({ where: { [Op.or]: where }, attributes: ['id', 'nombre'] })
+  return existente ? { id: existente.id, nombre: existente.nombre } : null
+}
+
 async function previewGmail(req, res) {
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
@@ -633,6 +678,13 @@ async function previewGmail(req, res) {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   }
 
+  // Los headers SSE ya salieron: un error de validación se informa como evento.
+  const preguntas = parsePreguntas(req.query.preguntas)
+  if (!preguntas) {
+    send('error', { error: 'Preguntas no válidas' })
+    return res.end()
+  }
+
   try {
     const { getSyncRefreshToken } = require('./gmailController')
     const syncRefreshToken = await getSyncRefreshToken()
@@ -651,15 +703,22 @@ async function previewGmail(req, res) {
 
     const searchQuery = req.query.q || 'in:inbox after:2025/01/01'
     const maxResults = Number(req.query.maxResults) || 500
-    const messages = await gmailService.searchEmails(searchQuery, maxResults)
+    // Se lista hasta el tope y se corta a maxResults DESPUÉS de excluir los ya
+    // revisados: si no, los primeros N siempre serían los mismos ya revisados.
+    const listados = await gmailService.searchEmails(searchQuery, MAX_IDS_LISTADOS)
 
-    if (!messages || messages.length === 0) {
+    if (!listados || listados.length === 0) {
       send('done', { count: 0 })
       return res.end()
     }
 
-    send('total', { total: messages.length })
-    console.log(`[previewGmail] Procesando ${messages.length} correos con SSE...`)
+    const revisados = await idsYaRevisados(listados.map(m => m.id))
+    const pendientes = listados.filter(m => !revisados.has(m.id))
+    const messages = pendientes.slice(0, maxResults)
+    const omitidos = listados.length - pendientes.length
+
+    send('total', { total: messages.length, omitidos })
+    console.log(`[previewGmail] Procesando ${messages.length} correos con SSE (${omitidos} omitidos por ya revisados)...`)
 
     let count = 0
     for (let i = 0; i < messages.length; i++) {
@@ -670,10 +729,15 @@ async function previewGmail(req, res) {
       }
 
       try {
-        const result = await gmailService.processOneEmail(messages[i].id)
+        const result = await gmailService.processOneEmail(messages[i].id, preguntas)
         count++
-        send('email', { index: i, total: messages.length, email: result })
-        console.log(`[previewGmail] ${i + 1}/${messages.length} - ${result.parseSource} - ${result.extractedData.nombre || 'sin nombre'}`)
+        const yaRegistrado = await buscarYaRegistrado(result.extractedData)
+        send('email', {
+          index: i,
+          total: messages.length,
+          email: { ...result, respuestas: result.respuestas || [], yaRegistrado },
+        })
+        console.log(`[previewGmail] ${i + 1}/${messages.length} - ${result.parseSource}`)
       } catch (err) {
         console.warn(`[previewGmail] Error en correo ${messages[i].id}:`, err.message)
         send('email_error', { index: i, total: messages.length, messageId: messages[i].id, error: detalleOGenerico(err, 'No se pudo procesar el correo') })
@@ -713,6 +777,8 @@ const syncGmailManualValidators = [
   body('referidos.*.cargoPostulado').optional({ nullable: true }).isString(),
   body('referidos.*.observaciones').optional({ nullable: true }).isString(),
   body('referidos.*.nombreReferidor').optional({ nullable: true }).isString(),
+  body('referidos.*.from').optional({ nullable: true }).isString(),
+  body('referidos.*.subject').optional({ nullable: true }).isString(),
 ]
 
 async function syncFromGmailManual(req, res) {
@@ -739,8 +805,6 @@ async function syncFromGmailManual(req, res) {
     })
   }
 
-  const Documento = getModel('Documento')
-  const useS3 = s3Service.isConfigured()
   const results = { created: 0, adjuntosGuardados: 0, errors: [], referidos: [] }
 
   for (const item of referidosInput) {
@@ -748,6 +812,14 @@ async function syncFromGmailManual(req, res) {
       const duplicado = await referidoYaImportado(item.messageId)
       if (duplicado) {
         results.errors.push({ messageId: item.messageId, nombre: item.nombre, error: duplicado })
+        continue
+      }
+
+      // Importado en el registro (p. ej. adjuntado a otra ficha): no se crea otra
+      // persona ni se pisa su referidoId. Un descartado sí se puede importar.
+      const revisado = await buscarCorreoRevisado(item.messageId)
+      if (revisado?.estado === 'importado') {
+        results.errors.push({ messageId: item.messageId, nombre: item.nombre, error: 'Duplicado: este correo ya fue importado' })
         continue
       }
 
@@ -789,64 +861,18 @@ async function syncFromGmailManual(req, res) {
         comentario: 'Importado desde Gmail (con revision manual)',
       })
 
+      await anotarCorreoImportado({
+        messageId: item.messageId,
+        from: item.from,
+        subject: item.subject,
+        referidoId: referido.id,
+        userId: req.auth.id,
+      })
+
       // ── Descargar y guardar adjuntos del correo ──
       if (syncRefreshToken) {
         try {
-          const email = await gmailService.getEmail(item.messageId)
-          const allParts = gmailService.getAllAttachmentParts(email.payload)
-
-          for (const att of allParts) {
-            if (att.size > 10 * 1024 * 1024) continue // Max 10MB
-
-            const buffer = await gmailService.downloadAttachment(item.messageId, att.attachmentId)
-            if (!buffer) continue
-
-            let rutaFinal = null
-            let s3Key = null
-
-            if (useS3) {
-              try {
-                s3Key = s3Service.generateReferidoFileKey(
-                  referido.rut || 'sin-rut', referido.id, att.filename, 'documento'
-                )
-                await s3Service.uploadFile(buffer, s3Key, att.mimeType, {
-                  referidoId: String(referido.id),
-                  originalName: att.filename,
-                  source: 'gmail'
-                })
-                rutaFinal = s3Key
-                console.log(`[syncGmailManual] S3: ${att.filename} -> ${s3Key}`)
-              } catch (s3Err) {
-                // La key ya estaba asignada: sin esto la fila afirma estar en S3 y no lo está.
-                s3Key = null
-                logger.error('[syncGmailManual] Falló la subida a S3, queda solo copia local', {
-                  referidoId: referido.id, archivo: att.filename, error: s3Err.message,
-                })
-              }
-            }
-
-            // Fallback local si S3 no configurado o falló
-            if (!rutaFinal) {
-              const uploadsDir = path.join(process.cwd(), 'uploads', 'referidos')
-              fs.mkdirSync(uploadsDir, { recursive: true })
-              const safeName = att.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
-              const localName = `${Date.now()}-${safeName}`
-              const localPath = path.join(uploadsDir, localName)
-              fs.writeFileSync(localPath, buffer)
-              rutaFinal = `uploads/referidos/${localName}`
-              console.log(`[syncGmailManual] Local: ${att.filename} -> ${rutaFinal}`)
-            }
-
-            await Documento.create({
-              nombre: att.filename,
-              ruta: rutaFinal,
-              s3Key: s3Key,
-              mimetype: att.mimeType,
-              size: buffer.length,
-              referidoId: referido.id
-            })
-            results.adjuntosGuardados++
-          }
+          results.adjuntosGuardados += await guardarAdjuntosDeCorreo(item.messageId, referido)
         } catch (attErr) {
           console.warn(`[syncGmailManual] Error guardando adjuntos de ${item.messageId}:`, attErr.message)
         }

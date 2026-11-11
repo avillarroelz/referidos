@@ -58,6 +58,7 @@ describe('Import de Gmail: idempotencia por messageId', () => {
     jest.clearAllMocks()
     jest.restoreAllMocks()
     await Referido.destroy({ where: {} })
+    await getModel('GmailCorreoRevisado').destroy({ where: {} })
   })
 
   // Sin rut ni email a proposito: es el caso que hoy no tiene deduplicacion.
@@ -97,8 +98,10 @@ describe('Import de Gmail: idempotencia por messageId', () => {
     it('violacion de UNIQUE por carrera: Duplicado, no 500', async () => {
       await importarManual('msg-carrera-manual')
       // Simula la carrera: el chequeo previo no ve el referido que otra request
-      // acaba de crear, y el create choca con el indice UNIQUE.
-      jest.spyOn(Referido, 'findOne').mockResolvedValueOnce(null)
+      // acaba de crear, y el create choca con el indice UNIQUE. Tampoco lo ve el
+      // registro de revisados (que ahora tambien se consulta antes de crear).
+      jest.spyOn(Referido, 'findOne').mockResolvedValueOnce(null).mockResolvedValueOnce(null)
+      jest.spyOn(getModel('GmailCorreoRevisado'), 'findOne').mockResolvedValueOnce(null)
 
       const res = await importarManual('msg-carrera-manual')
 
@@ -124,6 +127,123 @@ describe('Import de Gmail: idempotencia por messageId', () => {
       expect(res.body.created).toBe(0)
       expect(res.body.errors).toHaveLength(1)
       expect(res.body.errors[0].error).not.toMatch(/Duplicado/)
+    })
+  })
+
+  // El import anota el correo en el registro de revisados para que no vuelva a
+  // salir en el analisis (modulo Gmail).
+  describe('POST /api/referidos/sync/gmail/manual: registro de correos revisados', () => {
+    const enviar = (item) => request(app)
+      .post('/api/referidos/sync/gmail/manual')
+      .set(authHeader(rrhh))
+      .send({ referidos: [item] })
+
+    it('anota el correo como importado, con el referido, remitente, asunto y quien importo', async () => {
+      const res = await enviar({
+        messageId: 'msg-reg-1', nombre: 'Ana Perez', from: 'Ana <ana@x.cl>', subject: 'CV Ana',
+      })
+
+      expect(res.body.created).toBe(1)
+      const fila = await getModel('GmailCorreoRevisado').findOne({ where: { gmailMessageId: 'msg-reg-1' } })
+      expect(fila).toMatchObject({
+        estado: 'importado',
+        referidoId: res.body.referidos[0].id,
+        remitente: 'Ana <ana@x.cl>',
+        asunto: 'CV Ana',
+        revisadoPorUsuarioId: rrhh.id,
+      })
+    })
+
+    it('from y subject son opcionales', async () => {
+      const res = await enviar({ messageId: 'msg-reg-2', nombre: 'Sin Cabeceras' })
+
+      expect(res.body.created).toBe(1)
+      const fila = await getModel('GmailCorreoRevisado').findOne({ where: { gmailMessageId: 'msg-reg-2' } })
+      expect(fila.estado).toBe('importado')
+      expect(fila.remitente).toBeNull()
+      expect(fila.asunto).toBeNull()
+    })
+
+    it('un correo que estaba descartado pasa a importado', async () => {
+      await getModel('GmailCorreoRevisado').create({ gmailMessageId: 'msg-reg-3', estado: 'descartado' })
+
+      const res = await enviar({ messageId: 'msg-reg-3', nombre: 'Rescatado' })
+
+      expect(res.body.created).toBe(1)
+      const filas = await getModel('GmailCorreoRevisado').findAll({ where: { gmailMessageId: 'msg-reg-3' } })
+      expect(filas).toHaveLength(1)
+      expect(filas[0]).toMatchObject({ estado: 'importado', referidoId: res.body.referidos[0].id })
+    })
+
+    it('un duplicado (mismo email) no anota el correo', async () => {
+      await enviar({ messageId: 'msg-reg-4', nombre: 'Primero', email: 'dup@x.cl' })
+
+      const res = await enviar({ messageId: 'msg-reg-5', nombre: 'Segundo', email: 'dup@x.cl' })
+
+      expect(res.body.created).toBe(0)
+      expect(res.body.errors[0].error).toMatch(/^Duplicado: ya existe referido #\d+$/)
+      expect(await getModel('GmailCorreoRevisado').count({ where: { gmailMessageId: 'msg-reg-5' } })).toBe(0)
+    })
+
+    it('si anotar falla, el import igual se completa y el aviso no lleva datos personales', async () => {
+      jest.spyOn(getModel('GmailCorreoRevisado'), 'create').mockRejectedValueOnce(new Error('registro caido'))
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const res = await enviar({
+        messageId: 'msg-reg-6', nombre: 'Persona Secreta', from: 'secreta@x.cl', subject: 'Asunto Secreto',
+      })
+
+      expect(res.status).toBe(200)
+      expect(res.body.created).toBe(1)
+      expect(res.body.errors).toHaveLength(0)
+      expect(await Referido.count({ where: { gmailMessageId: 'msg-reg-6' } })).toBe(1)
+      expect(warn).toHaveBeenCalled()
+      const logs = JSON.stringify(warn.mock.calls)
+      expect(logs).not.toMatch(/Secret/)
+    })
+
+    // El bloque de adjuntos vive ahora en services/gmailAdjuntos.js: lo que se
+    // importa sigue guardandose como documento del referido.
+    it('guarda los adjuntos del correo como documentos del referido y los cuenta', async () => {
+      const fs = require('fs')
+      jest.spyOn(fs, 'mkdirSync').mockImplementation(() => {})
+      jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+      gmailService.getAllAttachmentParts.mockReturnValueOnce([
+        { filename: 'cv ana.pdf', mimeType: 'application/pdf', attachmentId: 'A1', size: 10 },
+      ])
+      gmailService.downloadAttachment.mockResolvedValueOnce(Buffer.from('%PDF-1.4'))
+
+      const res = await enviar({ messageId: 'msg-reg-8', nombre: 'Con Adjunto' })
+
+      expect(res.body.adjuntosGuardados).toBe(1)
+      const docs = await getModel('Documento').findAll({ where: { referidoId: res.body.referidos[0].id } })
+      expect(docs).toHaveLength(1)
+      expect(docs[0].nombre).toBe('cv ana.pdf')
+      expect(gmailService.downloadAttachment).toHaveBeenCalledWith('msg-reg-8', 'A1')
+      expect(gmailService.markAsRead).toHaveBeenCalledWith('msg-reg-8')
+      expect(gmailService.addLabel).toHaveBeenCalledWith('msg-reg-8', 'Referido-Procesado')
+    })
+
+    it('un correo ya importado (p. ej. adjuntado a otra ficha) es Duplicado: no crea la persona ni pisa el registro', async () => {
+      const otra = await Referido.create({ nombre: 'Ficha Original', creadoPorUserId: rrhh.id })
+      await getModel('GmailCorreoRevisado').create({
+        gmailMessageId: 'msg-reg-9', estado: 'importado', referidoId: otra.id,
+      })
+
+      const res = await enviar({ messageId: 'msg-reg-9', nombre: 'Persona Nueva' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.created).toBe(0)
+      expect(res.body.errors).toHaveLength(1)
+      expect(res.body.errors[0].error).toBe('Duplicado: este correo ya fue importado')
+      expect(await Referido.count({ where: { nombre: 'Persona Nueva' } })).toBe(0)
+      const fila = await getModel('GmailCorreoRevisado').findOne({ where: { gmailMessageId: 'msg-reg-9' } })
+      expect(fila.referidoId).toBe(otra.id)
+    })
+
+    it('from que no es texto se rechaza con 400', async () => {
+      const res = await enviar({ messageId: 'msg-reg-7', nombre: 'X', from: 123 })
+      expect(res.status).toBe(400)
     })
   })
 
@@ -165,9 +285,34 @@ describe('Import de Gmail: idempotencia por messageId', () => {
       expect(await Referido.count()).toBe(1)
     })
 
+    it('anota como importado el correo que crea', async () => {
+      const res = await importarAuto()
+
+      expect(res.body.created).toBe(1)
+      const ref = await Referido.findOne({ where: { nombre: 'Candidato Auto' } })
+      const fila = await getModel('GmailCorreoRevisado').findOne({ where: { gmailMessageId: 'msg-auto-1' } })
+      expect(fila).toMatchObject({ estado: 'importado', referidoId: ref.id, revisadoPorUsuarioId: rrhh.id })
+    })
+
+    it('se salta un correo descartado: cuenta skipped, no lo analiza ni crea nada', async () => {
+      await getModel('GmailCorreoRevisado').create({ gmailMessageId: 'msg-auto-1', estado: 'descartado' })
+
+      const res = await importarAuto()
+
+      expect(res.status).toBe(200)
+      expect(res.body.created).toBe(0)
+      expect(res.body.skipped).toBe(1)
+      expect(res.body.errors).toHaveLength(0)
+      expect(gmailService.processOneEmail).not.toHaveBeenCalled()
+      expect(await Referido.count()).toBe(0)
+      expect((await getModel('GmailCorreoRevisado').findOne({ where: { gmailMessageId: 'msg-auto-1' } })).estado).toBe('descartado')
+    })
+
     it('violacion de UNIQUE por carrera: Duplicado, no error generico', async () => {
       await importarAuto()
-      jest.spyOn(Referido, 'findOne').mockResolvedValueOnce(null)
+      // Ni el chequeo previo ni el registro de revisados ven al ganador de la carrera.
+      jest.spyOn(Referido, 'findOne').mockResolvedValueOnce(null).mockResolvedValueOnce(null)
+      jest.spyOn(getModel('GmailCorreoRevisado'), 'findOne').mockResolvedValueOnce(null)
 
       const res = await importarAuto()
 

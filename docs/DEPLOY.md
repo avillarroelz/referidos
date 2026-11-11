@@ -64,7 +64,14 @@ ignora, de modo que entre la migración y el despliegue el sistema sigue funcion
 node src/scripts/migrate.js add-token-version-to-usuarios.sql
 node src/scripts/migrate.js create-auditoria-documentos-table.sql
 node src/scripts/migrate.js add-gmail-message-id-to-referidos.sql
+node src/scripts/migrate.js create-gmail-correos-revisados.sql
 ```
+
+`create-gmail-correos-revisados.sql` (10-11-2026) es **obligatoria** antes de la
+imagen que trae la pantalla `/gmail`: el análisis de la casilla consulta la tabla
+`gmail_correos_revisados` y falla si no existe. Trae el backfill de los referidos
+ya importados desde Gmail. El backend anterior no la usa, así que el rollback de
+imagen no exige revertirla.
 
 `add-gmail-message-id-to-referidos.sql` (29-09-2026) es **obligatoria** con
 `SYNC_DB=false`: el modelo `Referido` ya declara la columna y sin ella todo
@@ -228,6 +235,24 @@ ese reinicio corta también los análisis sanos en curso.
 
 Cambiar `GMAIL_SYNC_EMAIL` exige reconectar la casilla nueva desde el panel: hasta
 entonces la sincronización sigue con el token de la anterior.
+
+### 5.9 Pantalla de Gmail (`/gmail`)
+
+Reemplaza al modal de sincronización. Después de desplegar, con un usuario RRHH:
+
+1. Abrir `/gmail`, analizar 5 correos y abrir la vista previa de un PDF. Si el
+   panel queda en blanco y la consola muestra un bloqueo de CSP, la cabecera no
+   trae `frame-src blob:` (ver `frontend/nginx.conf`; son tres bloques). Es el
+   único cambio de CSP de este lote: el PDF se muestra desde un `blob:` creado
+   por la propia página, no desde otro origen.
+2. Descartar un correo, analizar de nuevo y confirmar que no aparece; restaurarlo
+   desde "Historial" y confirmar que vuelve.
+
+La vista previa no guarda el adjunto en el servidor: lo baja de Gmail y lo entrega
+en la misma respuesta. El registro (`gmail_correos_revisados`) guarda solo el id del
+correo, remitente, asunto, estado, quién y cuándo. El callback de OAuth ahora vuelve
+a `/gmail?gmail_connected=...` (antes `/referidos`); el `redirect_uri` registrado en
+Google no cambia.
 
 ---
 

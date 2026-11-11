@@ -369,5 +369,79 @@ describe('V1: callback OAuth de Gmail y el parametro state', () => {
 
       expect(res.status).toBe(403)
     })
+
+    // La pantalla del modulo Gmail vive en /gmail (ya no en /referidos): todas las
+    // vueltas del callback, exitosas o no, aterrizan ahi con los mismos parametros.
+    describe('redirecciones a la pantalla /gmail', () => {
+      const aterriza = (res, query) => {
+        expect(res.status).toBe(302)
+        const url = new URL(res.headers.location)
+        expect(url.pathname).toBe('/gmail')
+        expect(url.search).toContain(query)
+      }
+
+      it('exito: gmail_connected con el correo de la casilla', async () => {
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+
+        const res = await volverConCookie(state, cookie)
+
+        aterriza(res, `?gmail_connected=true&email=${encodeURIComponent(CASILLA_DE_RECLUTAMIENTO)}`)
+      })
+
+      it('error de OAuth que devuelve Google', async () => {
+        aterriza(await request(app).get('/api/gmail/oauth2callback?error=access_denied'), '?gmail_error=access_denied')
+      })
+
+      it('state invalido', async () => {
+        aterriza(await volverDeGoogle(stateFabricado(1)), '?gmail_error=invalid_state')
+      })
+
+      it('solicitante sin permiso', async () => {
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+        await getModel('UsuarioRol').destroy({ where: {} })
+
+        aterriza(await volverConCookie(state, cookie), '?gmail_error=forbidden')
+      })
+
+      it('sin code', async () => {
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+
+        const res = await request(app)
+          .get(`/api/gmail/oauth2callback?state=${encodeURIComponent(state)}`)
+          .set('Cookie', cookie)
+
+        aterriza(res, '?gmail_error=no_code')
+      })
+
+      it('cuenta distinta de la casilla', async () => {
+        mockCorreoAutorizado = 'otra.persona@ecora.cl'
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+
+        aterriza(await volverConCookie(state, cookie), '?gmail_error=wrong_account')
+      })
+
+      it('Google no entrega refresh_token', async () => {
+        const { google } = require('googleapis')
+        google.auth.OAuth2().getToken.mockResolvedValueOnce({ tokens: { access_token: 'solo-acceso' } })
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+
+        aterriza(await volverConCookie(state, cookie), '?gmail_error=no_refresh_token')
+      })
+
+      it('no se pudo guardar el token', async () => {
+        tokenStore.saveConfig.mockRejectedValueOnce(new Error('disco lleno'))
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+
+        aterriza(await volverConCookie(state, cookie), '?gmail_error=save_failed')
+      })
+
+      it('falla el canje del codigo', async () => {
+        const { google } = require('googleapis')
+        google.auth.OAuth2().getToken.mockRejectedValueOnce(new Error('invalid_grant'))
+        const { state, cookie } = await iniciarConexion(await crear('ADMIN'))
+
+        aterriza(await volverConCookie(state, cookie), '?gmail_error=callback_failed&detail=')
+      })
+    })
   })
 })

@@ -191,7 +191,8 @@ class GmailService {
         return buffer.toString('utf-8')
       }
     } catch (err) {
-      console.warn(`[Gmail] Error leyendo ${filename}: ${err.message}`)
+      // Sin el nombre del archivo: casi siempre trae el nombre del postulante.
+      console.warn(`[Gmail] Error leyendo un adjunto (${buffer?.length ?? 0} bytes): ${err.message}`)
     }
     return ''
   }
@@ -213,7 +214,7 @@ class GmailService {
       if (text && text.trim().length > 20) {
         texts.push(`--- ${att.filename} ---\n${text.substring(0, 5000)}`)
         filenames.push(att.filename)
-        console.log(`[Gmail] Leido ${att.filename} (${text.length} chars)`)
+        console.log(`[Gmail] Leido un adjunto de ${messageId} (${text.length} chars)`)
       }
     }
 
@@ -222,7 +223,7 @@ class GmailService {
 
   // ── Procesamiento completo de un correo ────────────────────
 
-  async processOneEmail(messageId) {
+  async processOneEmail(messageId, preguntas = []) {
     const email = await this.getEmail(messageId)
     const parsed = this.parseEmailContent(email)
 
@@ -245,11 +246,15 @@ class GmailService {
     // 4. Extraer datos con IA (o regex como fallback)
     let extractedData = {}
     let parseSource = 'regex'
+    let respuestas = []
 
     if (emailParserAI.isAvailable() && content.trim().length > 20) {
       try {
-        const aiData = await emailParserAI.parse(content, parsed.subject, parsed.from, source === 'doc')
-        extractedData = aiData
+        const { respuestas: respuestasIA, ...datos } = await emailParserAI.parse(
+          content, parsed.subject, parsed.from, source === 'doc', preguntas
+        )
+        extractedData = datos
+        respuestas = respuestasIA || []
         parseSource = source === 'doc' ? 'ai-doc' : 'ai'
       } catch (err) {
         console.warn(`[Gmail] IA falló para ${messageId}: ${err.message}`)
@@ -267,8 +272,11 @@ class GmailService {
       date: parsed.date,
       bodyPreview: parsed.bodyPreview,
       attachments: allParts.map(p => p.filename),
-      attachmentParts: allParts, // Info completa para descargar al importar
+      // Sin attachmentId: el front identifica el adjunto por su posición y el
+      // backend lo vuelve a resolver contra Gmail (vista previa, import).
+      attachmentParts: allParts.map(({ filename, mimeType, size }) => ({ filename, mimeType, size })),
       extractedData,
+      respuestas,
       parseSource
     }
   }

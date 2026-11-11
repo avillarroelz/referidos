@@ -42,4 +42,89 @@ describe('gmailService.extractTextFromFile con PDF', () => {
     expect(texto).toBe('')
     warn.mockRestore()
   })
+
+  // Ley 21.719: el nombre del archivo de un CV casi siempre trae el nombre de la persona.
+  it('los logs no llevan el nombre del archivo (lectura fallida ni lectura correcta)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {})
+    gmailService.pdfAnalyzer = { analyzePdf: jest.fn(async () => { throw new Error('ECONNREFUSED') }) }
+    await gmailService.extractTextFromFile(Buffer.from('%PDF-'), 'Maria Gonzalez CV.pdf', 'application/pdf')
+
+    const textoCv = 'Maria Gonzalez, soldadora calificada con experiencia en faenas mineras.'
+    jest.spyOn(gmailService, 'getReadableAttachmentParts').mockReturnValue([
+      { filename: 'Maria Gonzalez CV.pdf', mimeType: 'application/pdf', attachmentId: 'A1', size: 100 },
+    ])
+    jest.spyOn(gmailService, 'downloadAttachment').mockResolvedValue(Buffer.from('%PDF-'))
+    jest.spyOn(gmailService, 'extractTextFromFile').mockResolvedValue(textoCv)
+    await gmailService.extractAttachmentsText('m1', {})
+
+    expect(log).toHaveBeenCalled()
+    expect(warn).toHaveBeenCalled()
+    const logs = JSON.stringify([...warn.mock.calls, ...log.mock.calls])
+    expect(logs).not.toMatch(/Maria|Gonzalez/)
+    jest.restoreAllMocks()
+  })
+})
+
+// processOneEmail: lo que el preview entrega al front (adjuntos sin attachmentId
+// y respuestas a las preguntas de filtro).
+describe('gmailService.processOneEmail', () => {
+  const emailParserAI = require('../../../src/services/emailParserAI')
+  const TEXTO_CV = 'Juan Perez, soldador calificado con diez años de experiencia en faenas mineras. '.repeat(3)
+  const correo = {
+    payload: {
+      headers: [
+        { name: 'Subject', value: 'CV Juan' },
+        { name: 'From', value: 'juan@x.cl' },
+        { name: 'Date', value: 'hoy' },
+      ],
+      parts: [{ filename: 'cv.pdf', mimeType: 'application/pdf', body: { attachmentId: 'ATT-SECRETO', size: 1234 } }],
+    },
+  }
+
+  beforeEach(() => {
+    jest.spyOn(gmailService, 'getEmail').mockResolvedValue(correo)
+    jest.spyOn(gmailService, 'downloadAttachment').mockResolvedValue(Buffer.from('%PDF-'))
+    jest.spyOn(gmailService, 'extractTextFromFile').mockResolvedValue(TEXTO_CV)
+    jest.spyOn(emailParserAI, 'isAvailable').mockReturnValue(true)
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it('no expone el attachmentId en attachmentParts', async () => {
+    jest.spyOn(emailParserAI, 'parse').mockResolvedValue({ nombre: 'Juan', respuestas: [] })
+
+    const r = await gmailService.processOneEmail('m1')
+
+    expect(r.attachmentParts).toEqual([{ filename: 'cv.pdf', mimeType: 'application/pdf', size: 1234 }])
+  })
+
+  it('pasa las preguntas a la IA y separa las respuestas de los datos extraidos', async () => {
+    const respuestas = [{ pregunta: 'Licencia B?', respuesta: 'si', cita: 'Licencia B' }]
+    const parse = jest.spyOn(emailParserAI, 'parse').mockResolvedValue({ nombre: 'Juan', email: null, respuestas })
+
+    const r = await gmailService.processOneEmail('m1', ['Licencia B?'])
+
+    expect(parse).toHaveBeenCalledWith(expect.any(String), 'CV Juan', 'juan@x.cl', true, ['Licencia B?'])
+    expect(r.respuestas).toEqual(respuestas)
+    expect(r.extractedData).toEqual({ nombre: 'Juan', email: null })
+    expect(r.extractedData).not.toHaveProperty('respuestas')
+  })
+
+  it('sin preguntas devuelve respuestas vacias', async () => {
+    jest.spyOn(emailParserAI, 'parse').mockResolvedValue({ nombre: 'Juan' })
+
+    const r = await gmailService.processOneEmail('m1')
+
+    expect(r.respuestas).toEqual([])
+  })
+
+  it('si la IA falla cae al regex y respuestas queda vacio, sin propagar el error', async () => {
+    jest.spyOn(emailParserAI, 'parse').mockRejectedValue(new Error('429'))
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const r = await gmailService.processOneEmail('m1', ['Licencia B?'])
+
+    expect(r.parseSource).toBe('regex')
+    expect(r.respuestas).toEqual([])
+  })
 })

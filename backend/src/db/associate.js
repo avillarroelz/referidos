@@ -24,6 +24,7 @@ module.exports = function associate(models) {
   const Comentario     = pick('comentario', 'Comentario', 'comentarios')
   const Notificacion   = pick('notificacion', 'Notificacion', 'notificaciones')
   const Feedback       = pick('feedback', 'Feedback', 'feedbacks')
+  const GmailCorreoRevisado = pick('gmail_correos_revisados', 'GmailCorreoRevisado')
 
   // ───────────────────────────────────────────────────────────────────────────────
   // Usuario ↔ Rol (N:M) a través de UsuarioRol
@@ -255,6 +256,25 @@ module.exports = function associate(models) {
     Feedback.belongsTo(Usuario, {
       as: 'autor',
       foreignKey: 'autorUserId',
+    })
+  }
+
+  // GmailCorreoRevisado → Usuario (quien lo revisó) y Referido (si se importó).
+  // Sin hasMany inverso: nadie navega desde el usuario o el referido al registro.
+  if (Usuario && GmailCorreoRevisado) {
+    GmailCorreoRevisado.belongsTo(Usuario, {
+      as: 'revisadoPor',
+      foreignKey: 'revisadoPorUsuarioId',
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
+    })
+  }
+  if (Referido && GmailCorreoRevisado) {
+    GmailCorreoRevisado.belongsTo(Referido, {
+      as: 'referido',
+      foreignKey: 'referidoId',
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
     })
   }
 }

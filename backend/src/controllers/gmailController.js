@@ -84,7 +84,7 @@ exports.gmailOAuthCallback = async (req, res) => {
   // Manejar errores de OAuth
   if (oauthError) {
     console.error('[gmail] OAuth error:', oauthError)
-    return res.redirect(`${frontendUrl}/referidos?gmail_error=${oauthError}`)
+    return res.redirect(`${frontendUrl}/gmail?gmail_error=${oauthError}`)
   }
 
   // ── Validacion del state, ANTES de canjear el codigo ──
@@ -105,7 +105,7 @@ exports.gmailOAuthCallback = async (req, res) => {
   if (!contenidoState) {
     limpiarState(res)
     console.warn('[gmail] state invalido o ausente en el callback')
-    return res.redirect(`${frontendUrl}/referidos?gmail_error=invalid_state`)
+    return res.redirect(`${frontendUrl}/gmail?gmail_error=invalid_state`)
   }
   limpiarState(res)
 
@@ -122,13 +122,13 @@ exports.gmailOAuthCallback = async (req, res) => {
   const rolesSolicitante = (solicitante?.roles || []).map(r => r.nombre)
   if (!solicitante || solicitante.estado === false || !rolesSolicitante.some(r => ROLES_QUE_CONECTAN.includes(r))) {
     console.warn('[gmail] callback rechazado: el solicitante no puede conectar la casilla')
-    return res.redirect(`${frontendUrl}/referidos?gmail_error=forbidden`)
+    return res.redirect(`${frontendUrl}/gmail?gmail_error=forbidden`)
   }
 
   const adminId = solicitante.id
 
   if (!code) {
-    return res.redirect(`${frontendUrl}/referidos?gmail_error=no_code`)
+    return res.redirect(`${frontendUrl}/gmail?gmail_error=no_code`)
   }
 
   try {
@@ -144,7 +144,7 @@ exports.gmailOAuthCallback = async (req, res) => {
 
     if (!tokens.refresh_token) {
       console.error('[gmail] No se recibio refresh_token')
-      return res.redirect(`${frontendUrl}/referidos?gmail_error=no_refresh_token`)
+      return res.redirect(`${frontendUrl}/gmail?gmail_error=no_refresh_token`)
     }
 
     // Obtener email de la cuenta autorizada usando Gmail API (no requiere scope extra)
@@ -167,7 +167,7 @@ exports.gmailOAuthCallback = async (req, res) => {
       } catch (e) {
         console.warn('[gmail] no se pudo revocar el permiso de la cuenta rechazada:', e.message)
       }
-      return res.redirect(`${frontendUrl}/referidos?gmail_error=wrong_account`)
+      return res.redirect(`${frontendUrl}/gmail?gmail_error=wrong_account`)
     }
 
     // Guardar en archivo de configuracion (centralizado)
@@ -181,17 +181,17 @@ exports.gmailOAuthCallback = async (req, res) => {
     try {
       await tokenStore.saveConfig(config)
       console.log(`[gmail] Token centralizado guardado (${tokenStore.storage}) para ${profile.emailAddress} por admin ${adminId}`)
-      res.redirect(`${frontendUrl}/referidos?gmail_connected=true&email=${encodeURIComponent(profile.emailAddress)}`)
+      res.redirect(`${frontendUrl}/gmail?gmail_connected=true&email=${encodeURIComponent(profile.emailAddress)}`)
     } catch (e) {
       console.error('[gmail] Error guardando token:', e.name || e.message)
-      res.redirect(`${frontendUrl}/referidos?gmail_error=save_failed`)
+      res.redirect(`${frontendUrl}/gmail?gmail_error=save_failed`)
     }
 
   } catch (error) {
     console.error('[gmail] Error en callback:', error.message)
     console.error('[gmail] Error detalle:', error.response?.data || error.stack)
     const detail = encodeURIComponent(error.message || 'unknown')
-    res.redirect(`${frontendUrl}/referidos?gmail_error=callback_failed&detail=${detail}`)
+    res.redirect(`${frontendUrl}/gmail?gmail_error=callback_failed&detail=${detail}`)
   }
 }
 

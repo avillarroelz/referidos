@@ -91,6 +91,28 @@ describe('Rate limiting', () => {
         .toContain(limitadores.heavyOpsLimiter)
     })
 
+    // Mirar adjuntos, descartar y revisar el historial son muchas peticiones livianas:
+    // con el cupo de operaciones pesadas (10 cada 15 min) la pantalla queda inservible.
+    it.each([
+      ['post', '/correos/descartar'],
+      ['get', '/correos/historial'],
+      ['get', '/correos/:messageId/adjuntos/:index'],
+      ['delete', '/correos/:messageId'],
+    ])('bandeja de Gmail: %s %s lleva su propio limitador y no el de operaciones pesadas', (metodo, ruta) => {
+      const montados = middlewaresDe(require('../../src/routes/gmail.routes'), metodo, ruta)
+      expect(montados).toContain(limitadores.gmailBandejaLimiter)
+      expect(montados).not.toContain(limitadores.heavyOpsLimiter)
+    })
+
+    it.each([
+      ['get', '/status'],
+      ['get', '/auth-url'],
+      ['post', '/correos/:messageId/adjuntar'],
+    ])('Gmail: %s %s lleva el limitador de operaciones pesadas', (metodo, ruta) => {
+      expect(middlewaresDe(require('../../src/routes/gmail.routes'), metodo, ruta))
+        .toContain(limitadores.heavyOpsLimiter)
+    })
+
     it('el limitador global cubre todo /api', () => {
       const capas = app._router.stack.filter(l => l.handle === limitadores.globalLimiter)
       expect(capas).toHaveLength(1)

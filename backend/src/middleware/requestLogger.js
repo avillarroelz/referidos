@@ -10,6 +10,8 @@ const CLAVES_CREDENCIAL = ['password', 'token', 'secret', 'apikey']
 // y si sirven para depurar. Campo personal nuevo → una linea mas aca.
 const CAMPOS_PERSONALES = [
   'nombre', 'nombrereferidor', 'rut', 'correo', 'email', 'telefono', 'observaciones',
+  // Correos de postulacion (bandeja de Gmail): asunto y remitente identifican a la persona.
+  'from', 'subject', 'remitente', 'asunto',
 ]
 
 const REDACTADO = '[REDACTED]'
