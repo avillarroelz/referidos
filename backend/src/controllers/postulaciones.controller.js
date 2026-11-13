@@ -8,6 +8,7 @@ const { Op } = require('sequelize')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS } = require('../lib/estados')
 const { notificarNuevoReferidoPublico } = require('../services/notificationService')
+const { verificarRut } = require('../services/listaBloqueo')
 const s3Service = require('../services/s3Service')
 const { logger } = require('../utils/logger')
 
@@ -99,6 +100,10 @@ async function crear(req, res) {
     }
   }
 
+  // Lista de no recontratación: se acepta igual (sin avisar al postulante) y
+  // RRHH ve la marca. Se consulta antes de abrir la transacción.
+  const { bloqueado } = await verificarRut(req.body.rut)
+
   const t = await sequelize.transaction()
   try {
     // Determinar creador / postulante (auth opcional)
@@ -166,6 +171,7 @@ async function crear(req, res) {
       creadoPorUserId: creadorId,
       postulanteUserId: postulanteId,
       origenPublico: !req.auth?.id,
+      enListaBloqueo: bloqueado,
     }, { transaction: t })
 
     await EstadoHistorial().create({

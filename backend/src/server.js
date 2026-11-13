@@ -95,6 +95,12 @@ async function bootstrap(){
       const { verificarSLAsVencidos } = require('./services/slaService')
       setInterval(verificarSLAsVencidos, 60 * 60 * 1000)
       console.log('⏰ SLA cron job iniciado (cada 1h)')
+
+      // Respaldo local de la lista de no recontratación: al arrancar y cada hora.
+      // No se espera ni puede lanzar: sin black el arranque sigue igual.
+      const { actualizarHuellas } = require('./services/listaBloqueo')
+      actualizarHuellas()
+      setInterval(actualizarHuellas, 60 * 60 * 1000)
     })
   }catch(err){
     console.error('❌ Error al iniciar:', err)

@@ -68,6 +68,14 @@ const config = {
     rateLimitMax: parseInt(process.env.PUBLIC_FORM_RATE_LIMIT) || 5,
   },
 
+  // black: lista de no recontratación. Las tres vacías = integración apagada
+  listaBloqueo: {
+    url: process.env.BLACK_API_URL || '',
+    apiKey: process.env.BLACK_API_KEY || '',
+    // Clave para calcular la huella HMAC del RUT (respaldo local si black no responde)
+    huellaKey: process.env.BLACK_HUELLA_KEY || '',
+  },
+
   // Anthropic API (parser IA de correos)
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || '',

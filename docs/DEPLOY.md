@@ -65,7 +65,14 @@ node src/scripts/migrate.js add-token-version-to-usuarios.sql
 node src/scripts/migrate.js create-auditoria-documentos-table.sql
 node src/scripts/migrate.js add-gmail-message-id-to-referidos.sql
 node src/scripts/migrate.js create-gmail-correos-revisados.sql
+node src/scripts/migrate.js create-lista-bloqueo.sql
 ```
+
+`create-lista-bloqueo.sql` (11-11-2026) es **obligatoria** antes de la imagen que
+consulta a black: el modelo `Referido` declara la columna `en_lista_bloqueo` y sin
+ella todo `SELECT` sobre `referidos` falla. Crea además `lista_bloqueo_huellas`
+(solo huellas HMAC, sin RUT ni nombre). El backend anterior ignora ambas, así que
+el rollback de imagen no exige revertirla.
 
 `create-gmail-correos-revisados.sql` (10-11-2026) es **obligatoria** antes de la
 imagen que trae la pantalla `/gmail`: el análisis de la casilla consulta la tabla
@@ -90,6 +97,9 @@ SELECT column_name FROM information_schema.columns
  WHERE table_name = 'usuarios' AND column_name = 'token_version';
 SELECT to_regclass('auditoria_documentos');
 SELECT to_regclass('referidos_gmail_message_id_unique');
+SELECT to_regclass('lista_bloqueo_huellas');
+SELECT column_name FROM information_schema.columns
+ WHERE table_name = 'referidos' AND column_name = 'en_lista_bloqueo';
 ```
 
 ---
@@ -253,6 +263,33 @@ en la misma respuesta. El registro (`gmail_correos_revisados`) guarda solo el id
 correo, remitente, asunto, estado, quién y cuándo. El callback de OAuth ahora vuelve
 a `/gmail?gmail_connected=...` (antes `/referidos`); el `redirect_uri` registrado en
 Google no cambia.
+
+### 5.10 Lista de no recontratación (black)
+
+Al ingresar una persona se consulta su RUT a black (`black.ecoraapp.com`).
+Variables en `backend.env`:
+
+| Variable | Para qué |
+|---|---|
+| `BLACK_API_URL` | Ruta **completa** de la API de black, `https://` y sin barra final. Ejemplo: `https://black.ecoraapp.com/api/consulta`. Si se configura solo el host, todas las consultas dan 404 y caen al respaldo. |
+| `BLACK_API_KEY` | Clave de API de Reclutamiento (cabecera `X-API-Key`). |
+| `BLACK_HUELLA_KEY` | Clave para calcular la huella HMAC del RUT; habilita el respaldo local. |
+
+- **Si faltan `BLACK_API_URL` o `BLACK_API_KEY`**: la integración queda apagada.
+  No se consulta nada, nadie se rechaza y el arranque no falla.
+- **Si falta solo `BLACK_HUELLA_KEY`**: se consulta a black, pero sin respaldo
+  local (no se descargan huellas).
+- **Si black falla** (timeout de 5 s, 401, 429, 5xx, respuesta inválida): el log
+  avisa solo el tipo de falla (nunca el RUT) y se busca la huella en
+  `lista_bloqueo_huellas`. Presente → se trata como bloqueado; ausente o sin
+  respaldo → el ingreso sigue. Las huellas se refrescan al arrancar y cada hora;
+  si el refresco falla se conserva la lista anterior.
+- Qué hace un bloqueado: ingreso interno e importaciones de Gmail se **rechazan**
+  con un texto fijo; postulaciones y formulario público se **aceptan** como
+  PENDIENTE con la marca `en_lista_bloqueo`, que solo ven RRHH, JefeRRHH y ADMIN.
+
+Verificación tras desplegar (sin RUT reales en el log): crear con un RUT libre
+debe responder 201; revisar en el log que no aparezca el aviso "black no respondió".
 
 ---
 

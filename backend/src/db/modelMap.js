@@ -15,4 +15,5 @@ module.exports = {
   Feedback: ['feedback', 'Feedback', 'feedbacks'],
   AuditoriaDocumento: ['auditoria_documentos', 'AuditoriaDocumento', 'auditoriaDocumento'],
   GmailCorreoRevisado: ['gmail_correos_revisados', 'GmailCorreoRevisado', 'gmailCorreoRevisado'],
+  ListaBloqueoHuella: ['lista_bloqueo_huellas', 'ListaBloqueoHuella', 'listaBloqueoHuella'],
 }

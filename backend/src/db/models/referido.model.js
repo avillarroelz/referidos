@@ -116,12 +116,25 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: 'gmail_message_id',
       },
+
+      // Está en la lista de no recontratación de black. Dato de control interno:
+      // solo lo ven RRHH, JefeRRHH y ADMIN (ver defaultScope abajo).
+      enListaBloqueo: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: 'en_lista_bloqueo',
+      },
     },
     {
       tableName: 'referidos',
       timestamps: true,
       createdAt: 'created_at',
       updatedAt: 'updated_at',
+      // La marca queda FUERA de toda lectura por defecto (incluidos los include
+      // desde otros modelos). Quien deba verla la pide con Referido.scope('conMarca').
+      defaultScope: { attributes: { exclude: ['enListaBloqueo'] } },
+      scopes: { conMarca: {} },
       indexes: [
         { fields: ['creado_por_usuario_id'] },
         { fields: ['postulante_user_id'] },

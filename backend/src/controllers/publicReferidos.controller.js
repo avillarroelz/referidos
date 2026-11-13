@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator')
 const { sequelize, getModel } = require('../db')
 const { ESTADOS } = require('../lib/estados')
 const { notificarNuevoReferidoPublico } = require('../services/notificationService')
+const { verificarRut } = require('../services/listaBloqueo')
 
 const Referido = () => getModel('Referido')
 const EstadoHistorial = () => getModel('EstadoHistorial')
@@ -32,6 +33,10 @@ async function crearPublico(req, res) {
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() })
   }
+
+  // Lista de no recontratación: se acepta igual (sin avisar) y RRHH ve la marca.
+  // Se consulta antes de abrir la transacción.
+  const { bloqueado } = await verificarRut(req.body.rut)
 
   const t = await sequelize.transaction()
   try {
@@ -86,6 +91,7 @@ async function crearPublico(req, res) {
       estado: ESTADOS.PENDIENTE,
       creadoPorUserId: creadorId,
       origenPublico: true,
+      enListaBloqueo: bloqueado,
     }, { transaction: t })
 
     await EstadoHistorial().create({

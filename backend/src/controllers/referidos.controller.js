@@ -10,6 +10,7 @@ const { guardarAdjuntosDeCorreo } = require('../services/gmailAdjuntos')
 const { buscarCorreoRevisado, idsYaRevisados, anotarCorreoImportado } = require('../services/gmailRegistro')
 const { config } = require('../config')
 const { notificarCambioEstado, notificarAsignacion } = require('../services/notificationService')
+const { verificarRut, crearVerificador, TEXTO_RECHAZO } = require('../services/listaBloqueo')
 
 // Modelos
 const Referido = getModel('Referido')
@@ -69,6 +70,14 @@ function rolesFromReq(req) {
   const hasADC = roles.includes('ADC')
   const hasJefeRRHH = roles.includes('JefeRRHH')
   return { roles, hasRRHH, hasADMIN, hasADC, hasJefeRRHH }
+}
+
+// La marca enListaBloqueo queda fuera de toda lectura (defaultScope del modelo);
+// solo RRHH, JefeRRHH y ADMIN la piden explícitamente con scope('conMarca').
+// Cualquier lectura nueva que serialice un Referido la excluye sin tocar nada.
+function referidoVisiblePara(req) {
+  const { hasRRHH, hasADMIN, hasJefeRRHH } = rolesFromReq(req)
+  return hasRRHH || hasADMIN || hasJefeRRHH ? Referido.scope('conMarca') : Referido
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -141,6 +150,9 @@ async function create(req, res) {
   if (assertValid(res, req)) return
   if (!req.auth?.id) return res.status(401).json({ error: 'No autenticado' })
 
+  // Antes de abrir la transacción: la consulta a black puede tardar hasta 5 s
+  const { bloqueado } = await verificarRut(req.body.rut)
+  if (bloqueado) return res.status(403).json({ error: TEXTO_RECHAZO })
 
   const t = await sequelize.transaction()
   try {
@@ -168,7 +180,10 @@ async function create(req, res) {
 
     await t.commit()
     console.log(`[req:${req.id || '-'}] [create] OK id=${ref.id}`)
-    return res.status(201).json(ref)
+    // La instancia recién creada trae todas las columnas: se quita la marca
+    const creado = ref.toJSON()
+    delete creado.enListaBloqueo
+    return res.status(201).json(creado)
   } catch (err) {
     await t.rollback()
     console.error(`[req:${req.id || '-'}] [create] FAIL`, err)
@@ -244,7 +259,7 @@ async function list(req, res) {
   try {
     const t0 = Date.now()
     const Documento = getModel('Documento')
-    const { rows, count } = await Referido.findAndCountAll({
+    const { rows, count } = await referidoVisiblePara(req).findAndCountAll({
       where,
       include: [
         { model: Usuario, as: 'creadoPor', attributes: ['id', 'username', 'correo'] },
@@ -283,7 +298,7 @@ async function getById(req, res) {
   console.log(`[req:${req.id || '-'}] [getById] id=${req.params.id}`)
 
   try {
-    const ref = await Referido.findByPk(Number(req.params.id), {
+    const ref = await referidoVisiblePara(req).findByPk(Number(req.params.id), {
       include: [
         { model: Usuario, as: 'creadoPor', attributes: ['id', 'username', 'correo'] },
         { model: Usuario, as: 'adcAsignado', attributes: ['id', 'username', 'correo'] },
@@ -522,6 +537,7 @@ async function syncFromGmail(req, res) {
     }
 
     const results = { processed: 0, created: 0, skipped: 0, errors: [] }
+    const verificarEnLote = crearVerificador()
 
     for (let i = 0; i < messages.length; i++) {
       try {
@@ -555,6 +571,12 @@ async function syncFromGmail(req, res) {
             const existing = await Referido.findOne({ where: { [Op.or]: dupWhere } })
             if (existing) { results.skipped++; continue }
           }
+        }
+
+        // Lista de no recontratación: no se crea ni se anota el correo
+        if ((await verificarEnLote(d.rut)).bloqueado) {
+          results.errors.push({ messageId: messages[i].id, error: TEXTO_RECHAZO })
+          continue
         }
 
         const creado = await Referido.create({
@@ -806,6 +828,7 @@ async function syncFromGmailManual(req, res) {
   }
 
   const results = { created: 0, adjuntosGuardados: 0, errors: [], referidos: [] }
+  const verificarEnLote = crearVerificador()
 
   for (const item of referidosInput) {
     try {
@@ -838,6 +861,12 @@ async function syncFromGmailManual(req, res) {
           })
           continue
         }
+      }
+
+      // Lista de no recontratación: no se crea ni se anota el correo
+      if ((await verificarEnLote(item.rut)).bloqueado) {
+        results.errors.push({ messageId: item.messageId, nombre: item.nombre, error: TEXTO_RECHAZO })
+        continue
       }
 
       const referido = await Referido.create({
