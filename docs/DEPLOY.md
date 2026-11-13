@@ -284,8 +284,10 @@ Variables en `backend.env`:
   `lista_bloqueo_huellas`. Presente → se trata como bloqueado; ausente o sin
   respaldo → el ingreso sigue. Las huellas se refrescan al arrancar y cada hora;
   si el refresco falla se conserva la lista anterior.
-- Qué hace un bloqueado: ingreso interno e importaciones de Gmail se **rechazan**
-  con un texto fijo; postulaciones y formulario público se **aceptan** como
+- Qué hace un bloqueado: el ingreso interno (`POST /api/referidos`) se **rechaza**
+  con el mismo 500 genérico de una falla real ("No se pudo crear el referido"), para
+  no revelar el bloqueo a TRABAJADOR ni ADC; las importaciones de Gmail (solo RRHH,
+  JefeRRHH y ADMIN) se **rechazan** con un texto fijo; postulaciones y formulario público se **aceptan** como
   PENDIENTE con la marca `en_lista_bloqueo`, que solo ven RRHH, JefeRRHH y ADMIN.
 
 Verificación tras desplegar (sin RUT reales en el log): crear con un RUT libre

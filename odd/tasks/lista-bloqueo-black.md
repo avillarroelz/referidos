@@ -57,7 +57,7 @@ Puntos de ingreso:
 
 | Entrada | Si está bloqueado |
 |---|---|
-| `POST /api/referidos` | 403 con el texto fijo; no crea |
+| `POST /api/referidos` | 500 genérico "No se pudo crear el referido" (decisión 2026-11-13, no revela el bloqueo); no crea |
 | `POST /api/referidos/sync/gmail/manual` | error por ítem con el texto fijo; no crea |
 | `POST /api/referidos/sync/gmail` | no crea; cuenta como error |
 | `POST /api/postulaciones` | crea PENDIENTE con `enListaBloqueo = true`; respuesta igual |
@@ -128,12 +128,14 @@ Frontend (2026-11-11), sin commit ni deploy:
 - Decisión pendiente: `src/lib/export.js` (`formatReferidosForExport`) no incluye la columna; no se agregó.
 
 - Migración (orquestador): corre dos veces sin error en Postgres 16, sobre la base de pruebas y sobre una base limpia; el CHECK rechaza huellas mal formadas.
-- Revisor: decisiones abiertas para Alejandro: (1) el 403 del ingreso interno permite a TRABAJADOR y ADC saber si un RUT está bloqueado; (2) un RUT con dígito verificador inválido entra sin consulta; (3) la exportación no incluye la marca.
+- Revisor: decisiones abiertas para Alejandro: (1) RESUELTA 2026-11-13: el ingreso interno responde el 500 genérico de creación en vez del 403 con texto (pruebas vistas en rojo, 190/190 en verde); (2) un RUT con dígito verificador inválido entra sin consulta; (3) la exportación no incluye la marca.
 - Deuda anotada: el correo de un bloqueado no se anota en Gmail y vuelve a consultarse; el aviso por correo a RRHH no menciona la marca; el frontend no fue auditado por el revisor.
+
+- Consulta real a black (2026-11-13, autorizada por Alejandro al entregar los secretos): `GET /api/consulta/12345678-5` → 200 `bloqueado: false`; `GET /api/consulta` → 38 huellas, todas hex64. Claves leídas de Secrets Manager (`lista-bloqueo/referidos-api-key`, `lista-bloqueo/referidos-huella-key`, us-east-1) sin imprimirse.
 
 ## Pendiente fuera de este repo
 
-- black: clave de huella para Referidos (instrucciones entregadas a Alejandro).
+- black: HECHO 2026-11-13. Consumidor Referidos con clave propia y clave de huella propia; `BLACK_API_URL=https://black.ecoraapp.com/api/consulta`.
 - AWS/EC2: agregar las tres variables a `backend.env` y correr la migración antes del deploy.
 
 ## Siguiente paso

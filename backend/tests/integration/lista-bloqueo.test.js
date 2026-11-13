@@ -101,11 +101,13 @@ describe('Lista de no recontratación (black)', () => {
 
   // ────────────────────────────────────────────────────────────
   describe('POST /api/referidos (ingreso interno)', () => {
-    it('RUT bloqueado: 403 con el texto fijo y no crea nada', async () => {
+    // El rechazo imita la falla genérica de creación: quien ingresa no puede
+    // distinguir un RUT bloqueado de un error del sistema (Ley 21.719, minimización)
+    it('RUT bloqueado: 500 idéntico a la falla genérica y no crea nada', async () => {
       const res = await crearInterno(trabajador, { rut: RUT_BLOQUEADO_PUNTOS })
 
-      expect(res.status).toBe(403)
-      expect(res.body).toEqual({ error: TEXTO_RECHAZO })
+      expect(res.status).toBe(500)
+      expect(res.body).toEqual({ error: 'No se pudo crear el referido' })
       expect(await Referido.count()).toBe(0)
       expect(await Historial.count()).toBe(0)
     })
@@ -125,14 +127,14 @@ describe('Lista de no recontratación (black)', () => {
       expect(black.consultas).toHaveLength(0)
     })
 
-    it('black caído y huella en el respaldo: 403', async () => {
+    it('black caído y huella en el respaldo: 500 genérico', async () => {
       black.caido = true
       await getModel('ListaBloqueoHuella').create({ huella: huellaDe(RUT_BLOQUEADO) })
 
       const res = await crearInterno(trabajador, { rut: RUT_BLOQUEADO })
 
-      expect(res.status).toBe(403)
-      expect(res.body).toEqual({ error: TEXTO_RECHAZO })
+      expect(res.status).toBe(500)
+      expect(res.body).toEqual({ error: 'No se pudo crear el referido' })
       expect(await Referido.count()).toBe(0)
     })
 

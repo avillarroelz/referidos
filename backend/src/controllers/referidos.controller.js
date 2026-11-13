@@ -152,7 +152,8 @@ async function create(req, res) {
 
   // Antes de abrir la transacción: la consulta a black puede tardar hasta 5 s
   const { bloqueado } = await verificarRut(req.body.rut)
-  if (bloqueado) return res.status(403).json({ error: TEXTO_RECHAZO })
+  // Respuesta idéntica a la falla genérica del catch: no revela que el RUT está bloqueado
+  if (bloqueado) return res.status(500).json({ error: 'No se pudo crear el referido' })
 
   const t = await sequelize.transaction()
   try {
