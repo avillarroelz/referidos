@@ -98,6 +98,9 @@ nombres repetidos entre empresas).
   códigos distintos, CHECK y UNIQUE rechazan datos malos, alta manual sigue con `origen=manual`.
 - Deuda del DWH: `C024900000` llega como `BA�O` desde Unysoft (corregido a BAÑO en la carga).
 - Sin cambio de modelo ni de código: la imagen actual ignora las columnas nuevas.
+- PRODUCCIÓN 2026-11-13 11:27: snapshot `referidos-pre-unidades-20261113-1126`; archivo copiado al
+  contenedor (sha256 `4948f1a7888297f6…` igual al del repo) y aplicado con `migrate.js`;
+  verificado `origen=dwh, estado=true, 27 filas, 27 códigos`. Commit `4220423`.
 
 ## Checklist
 
