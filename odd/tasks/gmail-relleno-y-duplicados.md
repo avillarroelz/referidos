@@ -1,6 +1,6 @@
 # Import de Gmail: relleno desde el remitente y sin personas repetidas
 
-Estado: CERRADA, en deploy (2026-11-13). Revisor: 2 rondas, sin bloqueantes.
+Estado: DESPLEGADA 2026-11-13, tag `43b4710`. Revisor: 2 rondas, sin bloqueantes.
 
 ## Pedido textual (Alejandro, 2026-11-13)
 
@@ -163,3 +163,9 @@ Resultados tras la 2ª ronda:
 
 - `parsearRemitente` (decodificador MIME + `limpiarNombre`) vive en `src/services/referidoDuplicado.js` porque las pruebas mockean `gmailService` completo; moverlo a `src/lib/remitente.js` (Alejandro eligió desplegar sin moverlo).
 - `item.from` del import manual lo envía el cliente: un usuario RRHH podría forzar "correo de relleno" y debilitar la detección por correo (impacto: duplicado, no permisos).
+
+## Deploy (2026-11-13 14:00, tag `43b4710`)
+
+Incluye el renombre a "Buscar" (frontend `4d7ae36`, `1efa565`). Sin migraciones. Respaldo `.env.bak-pre-43b4710`;
+pdf-analyzer retagueado (misma imagen). Verificado: `DB conectada` + `API en`, health 200, 6 cabeceras de
+seguridad, bundle con `label:"Buscar"` y 0 `label:"Gmail"`. Rollback: `TAG=6194ddd` + `docker compose up -d`.
