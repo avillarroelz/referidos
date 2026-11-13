@@ -1,6 +1,6 @@
 # Consulta a black (lista de no recontratación) al ingresar personas
 
-Estado: IMPLEMENTADO SIN COMMIT NI DEPLOY (2026-11-11). Falta la corrida final de Jest por el orquestador y la consulta real a black.
+Estado: DESPLEGADO 2026-11-13 09:55, tag `6194ddd` (incluye `db1946d`, pantalla /gmail). Cerrada.
 
 ## Pedido textual (Alejandro, 2026-11-11)
 
@@ -133,10 +133,14 @@ Frontend (2026-11-11), sin commit ni deploy:
 
 - Consulta real a black (2026-11-13, autorizada por Alejandro al entregar los secretos): `GET /api/consulta/12345678-5` → 200 `bloqueado: false`; `GET /api/consulta` → 38 huellas, todas hex64. Claves leídas de Secrets Manager (`lista-bloqueo/referidos-api-key`, `lista-bloqueo/referidos-huella-key`, us-east-1) sin imprimirse.
 
+- Deploy 2026-11-13 (tag `6194ddd`): snapshot `referidos-pre-deploy-20261113-0949`; migraciones `create-gmail-correos-revisados.sql` y `create-lista-bloqueo.sql` con la imagen nueva (tablas y columna verificadas); respaldos `.env.bak-pre-6194ddd` y `backend.env.bak-pre-6194ddd` en `/opt/referidos`; al arrancar, `lista_bloqueo_huellas` = 38; health 200, 6 cabeceras, `/gmail` 200, 0 avisos de black en el log. pdf-analyzer retagueado en ECR (misma imagen que `03862af`).
+- Incidente menor: las 3 variables BLACK_ ya las había agregado otra sesión a las 09:48; quedaron duplicadas con valores idénticos (comparados por hash) y se quitó el duplicado restaurando el respaldo. Sin reinicio.
+- Rollback: `TAG=03862af` en `/opt/referidos/.env` + `docker compose up -d`. Las migraciones son aditivas; las variables BLACK_ las ignora la imagen anterior.
+
 ## Pendiente fuera de este repo
 
 - black: HECHO 2026-11-13. Consumidor Referidos con clave propia y clave de huella propia; `BLACK_API_URL=https://black.ecoraapp.com/api/consulta`.
-- AWS/EC2: agregar las tres variables a `backend.env` y correr la migración antes del deploy.
+- AWS/EC2: HECHO 2026-11-13.
 
 ## Siguiente paso
 
