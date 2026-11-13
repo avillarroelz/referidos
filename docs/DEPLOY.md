@@ -66,7 +66,13 @@ node src/scripts/migrate.js create-auditoria-documentos-table.sql
 node src/scripts/migrate.js add-gmail-message-id-to-referidos.sql
 node src/scripts/migrate.js create-gmail-correos-revisados.sql
 node src/scripts/migrate.js create-lista-bloqueo.sql
+node src/scripts/migrate.js add-unidades-dwh.sql
 ```
+
+`add-unidades-dwh.sql` (13-11-2026) agrega a `unidad_negocio` el código del ERP
+(`codigo_empresa`, `codigo_unidad`) y el `origen` (`manual`/`dwh`), y carga las 27
+unidades activas de Ecora S.A. desde el DWH. No depende de una imagen nueva: el
+backend actual ignora las columnas, así que puede correrse en cualquier momento.
 
 `create-lista-bloqueo.sql` (11-11-2026) es **obligatoria** antes de la imagen que
 consulta a black: el modelo `Referido` declara la columna `en_lista_bloqueo` y sin
@@ -98,6 +104,7 @@ SELECT column_name FROM information_schema.columns
 SELECT to_regclass('auditoria_documentos');
 SELECT to_regclass('referidos_gmail_message_id_unique');
 SELECT to_regclass('lista_bloqueo_huellas');
+SELECT origen, count(*) FROM unidad_negocio GROUP BY 1;  -- dwh = 27
 SELECT column_name FROM information_schema.columns
  WHERE table_name = 'referidos' AND column_name = 'en_lista_bloqueo';
 ```
