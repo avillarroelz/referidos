@@ -106,7 +106,8 @@ describe('gmailService.processOneEmail', () => {
 
     expect(parse).toHaveBeenCalledWith(expect.any(String), 'CV Juan', 'juan@x.cl', true, ['Licencia B?'])
     expect(r.respuestas).toEqual(respuestas)
-    expect(r.extractedData).toEqual({ nombre: 'Juan', email: null })
+    // El correo que la IA no trajo (null) se completa con el remitente externo.
+    expect(r.extractedData).toEqual({ nombre: 'Juan', email: 'juan@x.cl', rellenadoDesdeRemitente: ['email'] })
     expect(r.extractedData).not.toHaveProperty('respuestas')
   })
 
@@ -126,5 +127,249 @@ describe('gmailService.processOneEmail', () => {
 
     expect(r.parseSource).toBe('regex')
     expect(r.respuestas).toEqual([])
+  })
+})
+
+// Relleno de lo que falta con el remitente: externo = postulante, @ecora.cl =
+// quien refiere, portales automaticos = nada. Lo que trae la IA/regex manda.
+describe('gmailService.processOneEmail: relleno desde el remitente', () => {
+  const emailParserAI = require('../../../src/services/emailParserAI')
+  const TEXTO_CV = 'Juan Perez, soldador calificado con diez años de experiencia en faenas mineras. '.repeat(3)
+
+  // Lo que Gmail escribe cuando el correo realmente salio de ecora.cl.
+  const AUTH_ECORA = 'mx.google.com; dkim=pass header.i=@ecora.cl header.s=google header.b=abc; spf=pass smtp.mailfrom=maria@ecora.cl; dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=ecora.cl'
+
+  const conRemitente = (from, datosIA, authResults) => {
+    const headers = [
+      { name: 'Subject', value: 'CV' }, { name: 'From', value: from }, { name: 'Date', value: 'hoy' },
+    ]
+    if (authResults) headers.push({ name: 'Authentication-Results', value: authResults })
+    jest.spyOn(gmailService, 'getEmail').mockResolvedValue({ payload: { headers } })
+    jest.spyOn(gmailService, 'extractAttachmentsText').mockResolvedValue({ text: TEXTO_CV, filenames: [] })
+    jest.spyOn(emailParserAI, 'isAvailable').mockReturnValue(true)
+    jest.spyOn(emailParserAI, 'parse').mockResolvedValue(datosIA)
+    return gmailService.processOneEmail('m1')
+  }
+  afterEach(() => jest.restoreAllMocks())
+
+  it('remitente externo con nombre: rellena nombre y email que faltan', async () => {
+    const r = await conRemitente('"Juan Pérez" <juan@gmail.com>', { nombre: null, email: null, telefono: '+56911112222' })
+
+    expect(r.extractedData).toMatchObject({ nombre: 'Juan Pérez', email: 'juan@gmail.com', telefono: '+56911112222' })
+  })
+
+  it('remitente externo sin comillas ni nombre', async () => {
+    const sinComillas = await conRemitente('Ana Soto <ana@gmail.com>', {})
+    expect(sinComillas.extractedData).toMatchObject({ nombre: 'Ana Soto', email: 'ana@gmail.com' })
+
+    const soloCorreo = await conRemitente('ana@gmail.com', {})
+    expect(soloCorreo.extractedData.email).toBe('ana@gmail.com')
+    expect(soloCorreo.extractedData.nombre).toBeFalsy()
+  })
+
+  it('nunca pisa un valor que trajo la IA', async () => {
+    const r = await conRemitente('"Otro Nombre" <otro@gmail.com>', { nombre: 'Nombre del CV', email: 'cv@x.cl' })
+
+    expect(r.extractedData).toMatchObject({ nombre: 'Nombre del CV', email: 'cv@x.cl' })
+  })
+
+  it('rellena solo el campo que falta', async () => {
+    const r = await conRemitente('"Otro Nombre" <otro@gmail.com>', { nombre: 'Nombre del CV', email: null })
+
+    expect(r.extractedData).toMatchObject({ nombre: 'Nombre del CV', email: 'otro@gmail.com' })
+  })
+
+  it('remitente @ecora.cl: su nombre va a nombreReferidor y no se toma como postulante', async () => {
+    const r = await conRemitente('"María Referidora" <maria@ecora.cl>', { nombre: 'Postulante', email: null, nombreReferidor: null }, AUTH_ECORA)
+
+    expect(r.extractedData.nombreReferidor).toBe('María Referidora')
+    expect(r.extractedData.nombre).toBe('Postulante')
+    expect(r.extractedData.email).toBeNull()
+  })
+
+  it('remitente @ecora.cl: no rellena nombre ni email aunque falten, ni pisa nombreReferidor', async () => {
+    const vacio = await conRemitente('"María Referidora" <maria@ecora.cl>', {}, AUTH_ECORA)
+    expect(vacio.extractedData.nombre).toBeFalsy()
+    expect(vacio.extractedData.email).toBeFalsy()
+
+    const conReferidor = await conRemitente('"María Referidora" <maria@ecora.cl>', { nombreReferidor: 'Pedro del CV' }, AUTH_ECORA)
+    expect(conReferidor.extractedData.nombreReferidor).toBe('Pedro del CV')
+  })
+
+  it.each([
+    'Laborum <no-reply@laborum.cl>',
+    'noreply@computrabajo.com',
+    'Notificaciones <notificaciones@empresa.cl>',
+    'Mail Delivery <mailer-daemon@googlemail.com>',
+    'postmaster@x.cl',
+    'no-responder@x.cl',
+    'noresponder@x.cl',
+    'no_responder@x.cl',
+    'no.responder@x.cl',
+    'info@empresa.cl',
+    'Contacto <contacto@empresa.cl>',
+    'newsletter@empresa.cl',
+  ])('remitente automatico (%s) no rellena nada', async (from) => {
+    const r = await conRemitente(from, { nombre: null, email: null, nombreReferidor: null })
+
+    expect(r.extractedData).toEqual({ nombre: null, email: null, nombreReferidor: null })
+  })
+
+  it('marca que campos salieron del remitente (rellenadoDesdeRemitente)', async () => {
+    const ambos = await conRemitente('Ana Soto <ana@gmail.com>', {})
+    expect(ambos.extractedData.rellenadoDesdeRemitente).toEqual(['nombre', 'email'])
+
+    const soloEmail = await conRemitente('Ana Soto <ana@gmail.com>', { nombre: 'Del CV' })
+    expect(soloEmail.extractedData.rellenadoDesdeRemitente).toEqual(['email'])
+
+    const nada = await conRemitente('Ana Soto <ana@gmail.com>', { nombre: 'Del CV', email: 'cv@x.cl' })
+    expect(nada.extractedData).not.toHaveProperty('rellenadoDesdeRemitente')
+
+    const interno = await conRemitente('María <maria@ecora.cl>', {}, AUTH_ECORA)
+    expect(interno.extractedData.rellenadoDesdeRemitente).toEqual(['nombreReferidor'])
+  })
+
+  // MIME (RFC 2047): Gmail entrega el display name tal como vino en el header.
+  it.each([
+    ['Q utf-8', '=?UTF-8?Q?Mar=C3=ADa_P=C3=A9rez?= <maria@gmail.com>', 'María Pérez'],
+    ['B base64', '=?UTF-8?B?TWFyw61hIFDDqXJleg==?= <maria@gmail.com>', 'María Pérez'],
+    ['Q iso-8859-1', '=?ISO-8859-1?Q?Mar=EDa_P=E9rez?= <maria@gmail.com>', 'María Pérez'],
+    ['palabras codificadas contiguas', '=?UTF-8?Q?Mar=C3=ADa?= =?UTF-8?Q?_P=C3=A9rez?= <maria@gmail.com>', 'María Pérez'],
+    ['mezcla con texto plano', 'Dra. =?UTF-8?Q?Mar=C3=ADa?= <maria@gmail.com>', 'Dra. María'],
+  ])('decodifica el nombre del remitente (%s)', async (_n, from, esperado) => {
+    const r = await conRemitente(from, {})
+
+    expect(r.extractedData).toMatchObject({ nombre: esperado, email: 'maria@gmail.com' })
+  })
+
+  it('un nombre que no se puede decodificar queda sin nombre, pero conserva el correo', async () => {
+    const r = await conRemitente('=?x-charset-raro?Q?abc?= <maria@gmail.com>', {})
+
+    expect(r.extractedData.nombre).toBeFalsy()
+    expect(r.extractedData.email).toBe('maria@gmail.com')
+    expect(r.extractedData.rellenadoDesdeRemitente).toEqual(['email'])
+  })
+
+  it('un nombre que contiene @ se descarta (suplantacion de otro correo)', async () => {
+    const r = await conRemitente('"jefe@ecora.cl" <x@gmail.com>', {})
+
+    expect(r.extractedData.nombre).toBeFalsy()
+    expect(r.extractedData.email).toBe('x@gmail.com')
+  })
+
+  describe('remitente @ecora.cl: solo si el correo realmente salio de ecora.cl', () => {
+    const DE = '"María Referidora" <maria@ecora.cl>'
+
+    it('dkim=pass con header.d del dominio interno', async () => {
+      const r = await conRemitente(DE, {}, 'mx.google.com; dkim=pass header.d=ecora.cl header.s=s1; spf=pass')
+      expect(r.extractedData.nombreReferidor).toBe('María Referidora')
+    })
+
+    it('dmarc=pass con header.from del dominio interno', async () => {
+      const r = await conRemitente(DE, {}, 'mx.google.com; dmarc=pass (p=NONE) header.from=ecora.cl')
+      expect(r.extractedData.nombreReferidor).toBe('María Referidora')
+    })
+
+    // El ARC lo puede fabricar el remitente: solo no habilita nada.
+    it('un ARC-Authentication-Results solo (sin Authentication-Results) NO habilita el relleno interno', async () => {
+      jest.spyOn(gmailService, 'extractAttachmentsText').mockResolvedValue({ text: TEXTO_CV, filenames: [] })
+      jest.spyOn(emailParserAI, 'isAvailable').mockReturnValue(true)
+      jest.spyOn(emailParserAI, 'parse').mockResolvedValue({})
+      jest.spyOn(gmailService, 'getEmail').mockResolvedValue({ payload: { headers: [
+        { name: 'From', value: DE }, { name: 'ARC-Authentication-Results', value: 'i=1; mx.google.com; dkim=pass header.d=ecora.cl' },
+      ] } })
+
+      const r = await gmailService.processOneEmail('m1')
+
+      expect(r.extractedData.nombreReferidor).toBeFalsy()
+    })
+
+    // Gmail pone sus ARC antes; el que vale es el de authserv-id mx.google.com.
+    it('un Authentication-Results de otro authserv-id (falsificado) se ignora aunque diga dmarc=pass', async () => {
+      const r = await conRemitente(DE, {}, 'evil.example.com; dmarc=pass header.from=ecora.cl; dkim=pass header.d=ecora.cl')
+
+      expect(r.extractedData.nombreReferidor).toBeFalsy()
+    })
+
+    it('con varios Authentication-Results usa el de mx.google.com, no el falsificado que viene antes', async () => {
+      jest.spyOn(gmailService, 'extractAttachmentsText').mockResolvedValue({ text: TEXTO_CV, filenames: [] })
+      jest.spyOn(emailParserAI, 'isAvailable').mockReturnValue(true)
+      jest.spyOn(emailParserAI, 'parse').mockResolvedValue({})
+      jest.spyOn(gmailService, 'getEmail').mockResolvedValue({ payload: { headers: [
+        { name: 'From', value: DE },
+        { name: 'Authentication-Results', value: 'evil.example.com; dmarc=pass header.from=ecora.cl' },
+        { name: 'Authentication-Results', value: 'mx.google.com; dmarc=fail header.from=ecora.cl' },
+      ] } })
+
+      const r = await gmailService.processOneEmail('m1')
+
+      expect(r.extractedData.nombreReferidor).toBeFalsy()
+    })
+
+    it.each([
+      ['dkim=fail', 'mx.google.com; dkim=fail header.d=ecora.cl; dmarc=fail header.from=ecora.cl'],
+      ['pass de otro dominio', 'mx.google.com; dkim=pass header.d=evil.com; dmarc=pass header.from=evil.com'],
+      ['pass de un dominio que termina igual', 'mx.google.com; dkim=pass header.d=noecora.cl'],
+      ['sin resultado de autenticacion', undefined],
+    ])('%s: no rellena nada, ni como interno ni como externo', async (_n, auth) => {
+      const r = await conRemitente(DE, { nombre: null, email: null, nombreReferidor: null }, auth)
+
+      expect(r.extractedData).toEqual({ nombre: null, email: null, nombreReferidor: null })
+    })
+
+    it('un correo @ecora.cl@otro.com no es interno: su dominio es el ultimo tras @', async () => {
+      const r = await conRemitente('Boss <boss@ecora.cl@evil.com>', {}, AUTH_ECORA)
+
+      expect(r.extractedData.nombreReferidor).toBeFalsy()
+    })
+  })
+
+  describe('bordes del parseo de From', () => {
+    it('mas de un <...> no se interpreta', async () => {
+      const r = await conRemitente('A <a@gmail.com> <b@evil.com>', { nombre: null, email: null })
+      expect(r.extractedData).toEqual({ nombre: null, email: null })
+    })
+
+    it('coma fuera de comillas (varios remitentes) no se interpreta', async () => {
+      const r = await conRemitente('Pérez, Juan <j@gmail.com>', { nombre: null, email: null })
+      expect(r.extractedData).toEqual({ nombre: null, email: null })
+    })
+
+    it('coma dentro de comillas es parte del nombre', async () => {
+      const r = await conRemitente('"Pérez, Juan" <j@gmail.com>', {})
+      expect(r.extractedData).toMatchObject({ nombre: 'Pérez, Juan', email: 'j@gmail.com' })
+    })
+
+    it('quita barras invertidas y caracteres de control del nombre', async () => {
+      const r = await conRemitente('"Ana\\ \u0007Soto\u0000" <a@gmail.com>', {})
+      expect(r.extractedData.nombre).toBe('Ana Soto')
+    })
+
+    it('corta el nombre a 100 caracteres', async () => {
+      const r = await conRemitente(`${'A'.repeat(150)} <a@gmail.com>`, {})
+      expect(r.extractedData.nombre).toHaveLength(100)
+    })
+  })
+
+  it('sin correo valido en From no rellena nada', async () => {
+    const r = await conRemitente('esto no es un remitente', { nombre: null, email: null })
+
+    expect(r.extractedData).toEqual({ nombre: null, email: null })
+  })
+
+  it('tambien rellena cuando la IA cae al regex', async () => {
+    jest.spyOn(emailParserAI, 'parse').mockRejectedValue(new Error('429'))
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const spy = jest.spyOn(emailParserAI, 'isAvailable').mockReturnValue(true)
+    jest.spyOn(gmailService, 'getEmail').mockResolvedValue({
+      payload: { headers: [{ name: 'From', value: 'Rosa Diaz <rosa@gmail.com>' }, { name: 'Subject', value: 'x' }] },
+    })
+    jest.spyOn(gmailService, 'extractAttachmentsText').mockResolvedValue({ text: TEXTO_CV, filenames: [] })
+
+    const r = await gmailService.processOneEmail('m1')
+
+    expect(spy).toHaveBeenCalled()
+    expect(r.parseSource).toBe('regex')
+    expect(r.extractedData).toMatchObject({ nombre: 'Rosa Diaz', email: 'rosa@gmail.com' })
   })
 })

@@ -2,6 +2,8 @@
 const { google } = require('googleapis')
 const emailParserAI = require('./emailParserAI')
 const pdfAnalyzerClient = require('./pdfAnalyzerClient')
+const { config } = require('../config')
+const { parsearRemitente } = require('./referidoDuplicado')
 
 // Lazy-load para evitar crash si faltan dependencias
 let mammoth
@@ -9,6 +11,51 @@ try { mammoth = require('mammoth') } catch (e) { console.warn('[GmailService] ma
 
 // Delay helper para throttling
 const delay = ms => new Promise(r => setTimeout(r, ms))
+
+// Remitentes que no son una persona: correos automaticos y portales de empleo.
+const LOCAL_AUTOMATICO = /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|no[-_.]?responder|notificaci[oó]n(es)?|notifications?|mailer-daemon|postmaster|bounces?|alertas?|info|contacto|newsletter)([-_.+].*)?$/i
+const AUTHSERV_ID = 'mx.google.com'
+const DOMINIOS_PORTAL = /(^|\.)(laborum|computrabajo|chiletrabajos|trabajando|indeed|linkedin|bne)\.[a-z.]+$/i
+
+// `authResults` ya viene filtrado por authserv-id en parseEmailContent.
+function tieneAutenticacionDe(authResults, dominio) {
+  if (!authResults) return false
+  const d = dominio.replace(/[.]/g, '\\.')
+  return authResults.split(';').some(clausula => {
+    const c = clausula.trim().toLowerCase()
+    if (/^dkim=pass\b/.test(c)) return new RegExp(`header\\.d=${d}(?![\\w.-])`).test(c)
+    if (/^dmarc=pass\b/.test(c)) return new RegExp(`header\\.from=${d}(?![\\w.-])`).test(c)
+    return false
+  })
+}
+
+// Completa lo que la IA/regex no trajo con el remitente, sin pisar nada:
+// interno (autenticado) = quien refiere; externo = el postulante; automatico = nadie.
+// `rellenadoDesdeRemitente` lista lo rellenado: ese correo no identifica al postulante.
+function rellenarDesdeRemitente(datos, from, authResults) {
+  const remitente = parsearRemitente(from)
+  if (!remitente) return datos
+  const arroba = remitente.email.lastIndexOf('@')
+  const local = remitente.email.slice(0, arroba)
+  const dominio = remitente.email.slice(arroba + 1)
+  if (LOCAL_AUTOMATICO.test(local) || DOMINIOS_PORTAL.test(dominio)) return datos
+
+  const relleno = { ...datos }
+  const rellenados = []
+  if (dominio === config.auth.internalEmailDomain) {
+    // Sin autenticacion el @ecora.cl puede ser falsificado: no se usa de ninguna forma.
+    if (!tieneAutenticacionDe(authResults, dominio)) return datos
+    if (!relleno.nombreReferidor && remitente.nombre) {
+      relleno.nombreReferidor = remitente.nombre
+      rellenados.push('nombreReferidor')
+    }
+  } else {
+    if (!relleno.nombre && remitente.nombre) { relleno.nombre = remitente.nombre; rellenados.push('nombre') }
+    if (!relleno.email) { relleno.email = remitente.email; rellenados.push('email') }
+  }
+  if (rellenados.length) relleno.rellenadoDesdeRemitente = rellenados
+  return relleno
+}
 
 class GmailService {
   constructor() {
@@ -92,6 +139,12 @@ class GmailService {
     const subject = headers.find(h => h.name === 'Subject')?.value || ''
     const from = headers.find(h => h.name === 'From')?.value || ''
     const date = headers.find(h => h.name === 'Date')?.value || ''
+    // Resultado de autenticacion del servidor receptor. Solo vale el que escribio Gmail
+    // (authserv-id mx.google.com): los demas, y todo ARC-*, los puede fabricar el remitente.
+    const authResults = headers
+      .filter(h => h.name?.toLowerCase() === 'authentication-results')
+      .map(h => h.value || '')
+      .find(v => v.split(';')[0].trim().toLowerCase() === AUTHSERV_ID) || ''
 
     let body = ''
     const extractBody = (payload) => {
@@ -115,7 +168,7 @@ class GmailService {
     }
     body = extractBody(email.payload)
 
-    return { subject, from, date, body, bodyPreview: body.substring(0, 1000) }
+    return { subject, from, date, authResults, body, bodyPreview: body.substring(0, 1000) }
   }
 
   // ── Adjuntos ───────────────────────────────────────────────
@@ -264,6 +317,8 @@ class GmailService {
     } else {
       extractedData = this._regexFallback(parsed.body, parsed.subject)
     }
+
+    extractedData = rellenarDesdeRemitente(extractedData, parsed.from, parsed.authResults)
 
     return {
       id: messageId,

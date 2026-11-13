@@ -185,6 +185,55 @@ describe('Import de Gmail: idempotencia por messageId', () => {
       expect(await getModel('GmailCorreoRevisado').count({ where: { gmailMessageId: 'msg-reg-5' } })).toBe(0)
     })
 
+    it('un duplicado que solo difiere en formato (RUT con puntos, correo en mayusculas) tampoco se crea', async () => {
+      await enviar({ messageId: 'msg-fmt-1', nombre: 'Primero', email: 'Dup@X.cl', rut: '12345678-5' })
+
+      const porRut = await enviar({ messageId: 'msg-fmt-2', nombre: 'Segundo', rut: '12.345.678-5' })
+      const porCorreo = await enviar({ messageId: 'msg-fmt-3', nombre: 'Tercero', email: 'dup@x.CL' })
+
+      for (const res of [porRut, porCorreo]) {
+        expect(res.body.created).toBe(0)
+        expect(res.body.errors[0].error).toMatch(/^Duplicado: ya existe referido #\d+$/)
+      }
+      expect(await Referido.count()).toBe(1)
+    })
+
+    // El servidor decide: el correo es "de relleno" si coincide con el From del propio item.
+    it('correo igual al From del item (de relleno): distinto nombre se importa, mismo nombre es duplicado', async () => {
+      const from = 'Consultora <rrhh@consultora.cl>'
+      const a = await enviar({ messageId: 'msg-rem-1', nombre: 'Uno Soto', email: 'rrhh@consultora.cl', from })
+      const b = await enviar({ messageId: 'msg-rem-2', nombre: 'Dos Rojas', email: 'RRHH@consultora.cl', from })
+
+      expect(a.body.created).toBe(1)
+      expect(b.body.created).toBe(1)
+      expect(await Referido.count()).toBe(2)
+
+      const c = await enviar({ messageId: 'msg-rem-3', nombre: 'UNO  SOTO', email: 'rrhh@consultora.cl', from })
+      expect(c.body.created).toBe(0)
+      expect(c.body.errors[0].error).toMatch(/^Duplicado: ya existe referido #\d+$/)
+    })
+
+    it('un correo distinto del From sigue siendo identidad, aunque el cliente mande emailDesdeRemitente: true', async () => {
+      await enviar({ messageId: 'msg-rem-4', nombre: 'Uno', email: 'maria@gmail.com', from: 'Maria <maria@gmail.com>' })
+
+      const res = await enviar({
+        messageId: 'msg-rem-5', nombre: 'Otro Nombre', email: 'maria@gmail.com',
+        from: 'Consultora <rrhh@consultora.cl>', emailDesdeRemitente: true,
+      })
+
+      expect(res.body.created).toBe(0)
+      expect(res.body.errors[0].error).toMatch(/^Duplicado: ya existe referido #\d+$/)
+    })
+
+    it('un RUT con DV invalido ya guardado igual detecta al mismo texto como duplicado', async () => {
+      await enviar({ messageId: 'msg-dv-1', nombre: 'Primero', rut: '12.345.678-9' })
+
+      const res = await enviar({ messageId: 'msg-dv-2', nombre: 'Segundo', rut: '12.345.678-9' })
+
+      expect(res.body.created).toBe(0)
+      expect(res.body.errors[0].error).toMatch(/^Duplicado: ya existe referido #\d+$/)
+    })
+
     it('si anotar falla, el import igual se completa y el aviso no lleva datos personales', async () => {
       jest.spyOn(getModel('GmailCorreoRevisado'), 'create').mockRejectedValueOnce(new Error('registro caido'))
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
@@ -306,6 +355,50 @@ describe('Import de Gmail: idempotencia por messageId', () => {
       expect(gmailService.processOneEmail).not.toHaveBeenCalled()
       expect(await Referido.count()).toBe(0)
       expect((await getModel('GmailCorreoRevisado').findOne({ where: { gmailMessageId: 'msg-auto-1' } })).estado).toBe('descartado')
+    })
+
+    it('no crea a quien ya existe con otro formato de RUT o correo: cuenta skipped', async () => {
+      await Referido.create({
+        nombre: 'Ya Existe', rut: '12345678-5', email: 'Ya@X.cl', creadoPorUserId: rrhh.id,
+      })
+      gmailService.processOneEmail.mockResolvedValue({
+        id: 'msg-auto-1',
+        extractedData: { nombre: 'Ya Existe', rut: '12.345.678-5', email: 'ya@x.cl' },
+      })
+
+      const res = await importarAuto()
+
+      expect(res.body.created).toBe(0)
+      expect(res.body.skipped).toBe(1)
+      expect(await Referido.count()).toBe(1)
+    })
+
+    it('el correo rellenado desde el remitente no omite a un postulante de OTRO nombre', async () => {
+      await Referido.create({ nombre: 'Otro', email: 'rrhh@consultora.cl', creadoPorUserId: rrhh.id })
+      gmailService.searchEmails.mockResolvedValue([{ id: 'msg-auto-1' }, { id: 'msg-auto-2' }])
+      gmailService.processOneEmail.mockImplementation(async (id) => ({
+        id,
+        extractedData: { nombre: `Postulante ${id}`, email: 'rrhh@consultora.cl', rellenadoDesdeRemitente: ['email'] },
+      }))
+
+      const res = await importarAuto()
+
+      expect(res.body.created).toBe(2)
+      expect(res.body.skipped).toBe(0)
+    })
+
+    it('el correo rellenado + mismo nombre que un referido existente: se omite (skipped)', async () => {
+      await Referido.create({ nombre: 'María Pérez', email: 'maria@gmail.com', creadoPorUserId: rrhh.id })
+      gmailService.searchEmails.mockResolvedValue([{ id: 'msg-auto-1' }])
+      gmailService.processOneEmail.mockResolvedValue({
+        id: 'msg-auto-1',
+        extractedData: { nombre: 'MARIA PEREZ', email: 'maria@gmail.com', rellenadoDesdeRemitente: ['nombre', 'email'] },
+      })
+
+      const res = await importarAuto()
+
+      expect(res.body.created).toBe(0)
+      expect(res.body.skipped).toBe(1)
     })
 
     it('violacion de UNIQUE por carrera: Duplicado, no error generico', async () => {

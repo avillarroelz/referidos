@@ -174,6 +174,87 @@ describe('GET /api/referidos/sync/gmail/preview: correos revisados, ya registrad
     expect(porId.sinDatos.yaRegistrado).toBeNull()
   })
 
+  it('yaRegistrado ignora puntos/guion/k del RUT y mayusculas del correo', async () => {
+    const existente = await getModel('Referido').create({
+      nombre: 'Persona Existente', email: 'Juan@Gmail.com', rut: '1000005-K', creadoPorUserId: admin.id,
+    })
+    gmailService.searchEmails.mockResolvedValueOnce(ids('porRut', 'porEmail'))
+    gmailService.processOneEmail.mockImplementation(async (id) => ({
+      id,
+      extractedData: {
+        porRut: { nombre: 'A', rut: '1.000.005-k' },
+        porEmail: { nombre: 'B', email: 'JUAN@gmail.com' },
+      }[id],
+      parseSource: 'regex',
+    }))
+
+    const res = await preview()
+
+    const porId = Object.fromEntries(payloadsDeEvento(res.text, 'email').map(e => [e.email.id, e.email]))
+    expect(porId.porRut.yaRegistrado).toEqual({ id: existente.id, nombre: 'Persona Existente' })
+    expect(porId.porEmail.yaRegistrado).toEqual({ id: existente.id, nombre: 'Persona Existente' })
+  })
+
+  it('une a la misma persona repetida en el analisis: el primero (mas reciente) se queda y los demas traen duplicadoDe', async () => {
+    gmailService.searchEmails.mockResolvedValueOnce(ids('nuevo', 'conRutPuntos', 'conCorreoMayus', 'otraPersona', 'sinDatos1', 'sinDatos2'))
+    gmailService.processOneEmail.mockImplementation(async (id) => ({
+      id,
+      extractedData: {
+        nuevo: { nombre: 'Ana', rut: '12345678-5', email: 'ana@x.cl' },
+        conRutPuntos: { nombre: 'Ana', rut: '12.345.678-5' },
+        conCorreoMayus: { nombre: 'Ana', email: 'ANA@x.cl' },
+        otraPersona: { nombre: 'Luis', rut: '11111111-1', email: 'luis@x.cl' },
+        sinDatos1: { nombre: 'Z' },
+        sinDatos2: { nombre: 'Z' },
+      }[id],
+      parseSource: 'regex',
+    }))
+
+    const res = await preview()
+
+    const porId = Object.fromEntries(payloadsDeEvento(res.text, 'email').map(e => [e.email.id, e.email]))
+    expect(porId.nuevo.duplicadoDe).toBeNull()
+    expect(porId.conRutPuntos.duplicadoDe).toBe('nuevo')
+    expect(porId.conCorreoMayus.duplicadoDe).toBe('nuevo')
+    expect(porId.otraPersona.duplicadoDe).toBeNull()
+    // Sin RUT ni correo no hay con que comparar: no se unen.
+    expect(porId.sinDatos1.duplicadoDe).toBeNull()
+    expect(porId.sinDatos2.duplicadoDe).toBeNull()
+  })
+
+  // Correo rellenado desde el remitente = clave debil: solo identifica junto al nombre.
+  it('mismo remitente (correo rellenado) y DISTINTO nombre (consultora): no se unen ni marcan yaRegistrado', async () => {
+    await getModel('Referido').create({ nombre: 'Otro', email: 'rrhh@consultora.cl', creadoPorUserId: admin.id })
+    gmailService.searchEmails.mockResolvedValueOnce(ids('cv1', 'cv2'))
+    gmailService.processOneEmail.mockImplementation(async (id) => ({
+      id,
+      extractedData: { nombre: `Postulante ${id}`, email: 'rrhh@consultora.cl', rellenadoDesdeRemitente: ['email'] },
+      parseSource: 'ai-doc',
+    }))
+
+    const res = await preview()
+
+    const emails = payloadsDeEvento(res.text, 'email').map(e => e.email)
+    expect(emails.map(e => e.duplicadoDe)).toEqual([null, null])
+    expect(emails.map(e => e.yaRegistrado)).toEqual([null, null])
+  })
+
+  it('mismo remitente (correo rellenado) y MISMO nombre: se une y marca yaRegistrado', async () => {
+    const existente = await getModel('Referido').create({ nombre: 'María Pérez', email: 'maria@gmail.com', creadoPorUserId: admin.id })
+    gmailService.searchEmails.mockResolvedValueOnce(ids('m1', 'm2'))
+    gmailService.processOneEmail.mockImplementation(async (id) => ({
+      id,
+      extractedData: { nombre: id === 'm1' ? 'MARIA PEREZ' : 'María  Pérez', email: 'Maria@Gmail.com', rellenadoDesdeRemitente: ['nombre', 'email'] },
+      parseSource: 'ai-doc',
+    }))
+
+    const res = await preview()
+
+    const emails = payloadsDeEvento(res.text, 'email').map(e => e.email)
+    expect(emails.map(e => e.duplicadoDe)).toEqual([null, 'm1'])
+    expect(emails[0].yaRegistrado).toEqual({ id: existente.id, nombre: 'María Pérez' })
+  })
+
   it('el log de progreso no lleva el nombre del candidato', async () => {
     gmailService.searchEmails.mockResolvedValueOnce(ids('m1'))
     gmailService.processOneEmail.mockResolvedValueOnce({

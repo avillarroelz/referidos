@@ -8,6 +8,7 @@ const { detalleParaCliente, detalleOGenerico } = require('../lib/detalleError')
 const gmailService = require('../services/gmailService')
 const { guardarAdjuntosDeCorreo } = require('../services/gmailAdjuntos')
 const { buscarCorreoRevisado, idsYaRevisados, anotarCorreoImportado } = require('../services/gmailRegistro')
+const { buscarReferidoExistente, clavesDePersona, parsearRemitente } = require('../services/referidoDuplicado')
 const { config } = require('../config')
 const { notificarCambioEstado, notificarAsignacion } = require('../services/notificationService')
 const { verificarRut, crearVerificador, TEXTO_RECHAZO } = require('../services/listaBloqueo')
@@ -565,13 +566,8 @@ async function syncFromGmail(req, res) {
 
         // Verificar duplicados
         if (options.skipDuplicates) {
-          const dupWhere = []
-          if (d.rut) dupWhere.push({ rut: d.rut })
-          if (d.email) dupWhere.push({ email: d.email })
-          if (dupWhere.length > 0) {
-            const existing = await Referido.findOne({ where: { [Op.or]: dupWhere } })
-            if (existing) { results.skipped++; continue }
-          }
+          const existing = await buscarReferidoExistente(d)
+          if (existing) { results.skipped++; continue }
         }
 
         // Lista de no recontratación: no se crea ni se anota el correo
@@ -673,12 +669,7 @@ function parsePreguntas(raw) {
 
 // Referido existente con el mismo email o RUT que extrajo el análisis.
 async function buscarYaRegistrado(extracted = {}) {
-  const where = []
-  if (extracted.rut) where.push({ rut: extracted.rut })
-  if (extracted.email) where.push({ email: extracted.email })
-  if (where.length === 0) return null
-  const existente = await Referido.findOne({ where: { [Op.or]: where }, attributes: ['id', 'nombre'] })
-  return existente ? { id: existente.id, nombre: existente.nombre } : null
+  return buscarReferidoExistente(extracted)
 }
 
 async function previewGmail(req, res) {
@@ -744,6 +735,9 @@ async function previewGmail(req, res) {
     console.log(`[previewGmail] Procesando ${messages.length} correos con SSE (${omitidos} omitidos por ya revisados)...`)
 
     let count = 0
+    // Gmail lista del mas reciente al mas antiguo: la primera tarjeta de cada
+    // persona se queda y las siguientes quedan marcadas como repetidas.
+    const vistos = new Map()
     for (let i = 0; i < messages.length; i++) {
       // Verificar si el cliente desconectó
       if (req.socket.destroyed) {
@@ -755,10 +749,13 @@ async function previewGmail(req, res) {
         const result = await gmailService.processOneEmail(messages[i].id, preguntas)
         count++
         const yaRegistrado = await buscarYaRegistrado(result.extractedData)
+        const claves = clavesDePersona(result.extractedData)
+        const duplicadoDe = vistos.get(claves.find(c => vistos.has(c))) || null
+        if (!duplicadoDe) claves.forEach(c => vistos.set(c, messages[i].id))
         send('email', {
           index: i,
           total: messages.length,
-          email: { ...result, respuestas: result.respuestas || [], yaRegistrado },
+          email: { ...result, respuestas: result.respuestas || [], yaRegistrado, duplicadoDe },
         })
         console.log(`[previewGmail] ${i + 1}/${messages.length} - ${result.parseSource}`)
       } catch (err) {
@@ -848,20 +845,19 @@ async function syncFromGmailManual(req, res) {
       }
 
       // Verificar duplicados por RUT o email
-      const duplicateWhere = []
-      if (item.rut) duplicateWhere.push({ rut: item.rut })
-      if (item.email) duplicateWhere.push({ email: item.email })
-
-      if (duplicateWhere.length > 0) {
-        const existing = await Referido.findOne({ where: { [Op.or]: duplicateWhere } })
-        if (existing) {
-          results.errors.push({
-            messageId: item.messageId,
-            nombre: item.nombre,
-            error: `Duplicado: ya existe referido #${existing.id}`
-          })
-          continue
-        }
+      // El servidor decide si el correo es de relleno: coincide con el From del propio item.
+      const correoItem = typeof item.email === 'string' ? item.email.trim().toLowerCase() : ''
+      const emailDeRelleno = !!correoItem && parsearRemitente(item.from)?.email === correoItem
+      const existing = await buscarReferidoExistente({
+        rut: item.rut, email: item.email, nombre: item.nombre, emailDeRelleno,
+      })
+      if (existing) {
+        results.errors.push({
+          messageId: item.messageId,
+          nombre: item.nombre,
+          error: `Duplicado: ya existe referido #${existing.id}`
+        })
+        continue
       }
 
       // Lista de no recontratación: no se crea ni se anota el correo
