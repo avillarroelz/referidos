@@ -102,6 +102,18 @@ nombres repetidos entre empresas).
   contenedor (sha256 `4948f1a7888297f6…` igual al del repo) y aplicado con `migrate.js`;
   verificado `origen=dwh, estado=true, 27 filas, 27 códigos`. Commit `4220423`.
 
+## Alta manual de ADC (pedido de Alejandro, 2026-11-13)
+
+"ahora quiero que me crees los usuarios de ADC" → "crealos todos" (18 de la app que mostró en
+capturas; su base no es `database-reclutest`, que no tiene perfil ADC).
+- Creados 17 en producción (login Google, sin contraseña, rol ADC); `ryanez` (#82, inactivo en la
+  captura) se omitió: la cuenta vigente es `roberto.yanez`. Total de usuarios ADC: 18 (incluye `test_adc`).
+- Con unidad (cruce con los 5 ADC activos del DWH): ccalderon, kturpie, manuel.ly, roberto.yanez, schau.
+  Los otros 12 quedan sin unidad (no figuran como ADC activos en el DWH).
+- Ensayo en seco con ROLLBACK, luego snapshot `referidos-pre-adc-20261113-1147` y una transacción.
+- Los nombres del DWH se extrajeron cifrados (RSA+AES-GCM) para no dejar PII en CloudWatch.
+- Las líneas "Mantencion"/"Obras Civiles" de la otra app no se trasladaron (Referidos asigna por unidad).
+
 ## Checklist
 
 - [ ] Aprobación del diseño
