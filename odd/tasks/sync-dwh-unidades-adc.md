@@ -113,6 +113,8 @@ capturas; su base no es `database-reclutest`, que no tiene perfil ADC).
 - Ensayo en seco con ROLLBACK, luego snapshot `referidos-pre-adc-20261113-1147` y una transacción.
 - Los nombres del DWH se extrajeron cifrados (RSA+AES-GCM) para no dejar PII en CloudWatch.
 - Las líneas "Mantencion"/"Obras Civiles" de la otra app no se trasladaron (Referidos asigna por unidad).
+- 2026-11-13 (2º pedido, captura de destinatarios): + `jtorres@ecora.cl` y `lbedwell@ecora.cl` (correos
+  verificados en Gmail, no adivinados); rcortes, malvarez y fmorgado ya eran ADC. Total ADC: 20.
 
 ## Checklist
 
